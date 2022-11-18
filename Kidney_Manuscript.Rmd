@@ -1,0 +1,1680 @@
+---
+title: "Kidney Manuscript"
+author: "Siwei Zhang"
+date: "<small>`r Sys.Date()`</small>"
+output:
+  rmdformats::robobook:
+    thumbnails: no
+    lightbox: yes
+    gallery: no
+    highlight: tango
+    use_bookdown: no
+    toc_depth: 6
+    fig_caption: yes
+    embed_fonts: no
+    keep_md: no
+    number_sections: yes
+    code_folding: hide
+resource_files:
+- flowchart.png
+- GWAS_Kidney_Limit1_Filter0.png
+- UMOD_gene_zoom_in.png
+---
+
+## GWAS tables and figures
+
+### GWAS Flowchart
+
+```{r,message=FALSE,warning=FALSE,out.width="100%", out.height="710%"}
+library(nloptr)
+knitr::include_graphics("flowchart_update.png")
+```
+
+\newpage
+
+### GWAS Manhattan Plot
+
+![GWAS Manhattan Plot](GWAS_Kidney_Limit1_Filter0.png)
+
+<!-- # ```{r,echo=FALSE,message=FALSE,warning=FALSE,out.width="100%", out.height="170%"} -->
+
+<!-- #  -->
+
+<!-- # knitr::include_graphics("GWAS_Kidney_Limit1_Filter0.png") -->
+
+<!-- #  -->
+
+<!-- # ``` -->
+
+\newpage
+
+### GWAS Zoom-in Plot
+
+![GWAS Zoom-in Plot](UMOD_gene_zoom_in.png)
+
+<!-- # ```{r,echo=FALSE,message=FALSE,warning=FALSE,out.width="100%", out.height="170%"} -->
+
+<!-- #  -->
+
+<!-- # knitr::include_graphics("UMOD_gene_zoom_in.png") -->
+
+<!-- #  -->
+
+<!-- # ``` -->
+
+\newpage
+
+### GWAS Summary Statitistics
+
+```{r, warning=FALSE,message=FALSE}
+library(knitr)
+gwas_ks001 <- read.table("GWAS_KS001_annotation.txt",header = TRUE,sep = "\t")
+gwas_ks001 <- gwas_ks001[order(gwas_ks001$P),c(-16)]
+gwas_result <- gwas_ks001[1:11,c(1,2,3,4,6,10,12,15,21)]
+gwas_result$L95 <- paste0("[",round(gwas_ks001$L95[1:11],2),",",round(gwas_ks001$U95[1:11],2),"]")
+colnames(gwas_result) <- c("Chr","Position","Snp","Ref","Minor","OR","95% CI","Pvalue","Gene")
+gwas_result$OR <- round(gwas_result$OR,2)
+gwas_result$Pvalue <- format(gwas_result$Pvalue, digits=2)
+gwas_result$Snp[3] <- "rs13335818"
+gwas_result$Snp[8] <- "rs71149135"
+gwas_result$Snp[10] <- "rs111285796"
+
+snp_paper <- data.frame("Chr"=c(16,16),"Position"=c(20392332,20393308),"Snp"=c("rs77924615","rs35747824"),
+                        "Ref"=c("G","A"),"Minor"=c("A","T"),"OR"=c(1.16,1.10),"95% CI"=c("[1.10,1.22]","[1.04,1.16]"),"Pvalue"=c(1.2e-06,6.6e-04),"Gene"=c("UMOD","UMOD"))
+colnames(snp_paper) <- c("Chr","Position","Snp","Ref","Minor","OR","95% CI","Pvalue","Gene")
+gwas_result <- rbind(gwas_result,snp_paper)
+gwas_result <- gwas_result[-11,]
+
+kable(gwas_result,row.names = FALSE)
+```
+
+## GWAS (among diagnosis)
+
+### GWAS Manhattan Plot (among diagnosis)
+
+![GWAS Manhattan Plot(diagnosis)](GWAS_Kidney_diagnosis_surgVSnonsurg.png)
+
+```{r, eval=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+age_icd = read_delim("GRID.AgeKSOnsetICD01.csv",delim = ",") %>% dplyr::rename(grid=FID)
+age_cpt <- read_delim("GRID.AgeKSOnsetCPT01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+
+sub_gwas_dat = age_icd %>%
+  dplyr::select(grid) %>%
+  left_join(.,age_cpt %>% dplyr::select(grid) %>% mutate(group=2),by="grid") %>%
+  mutate(group=ifelse(is.na(group),1,group))
+
+fam = read_table("cleanchr_qc_plink2.fam",col_names = FALSE) %>%
+  rename(grid = X1) %>%
+  left_join(.,sub_gwas_dat,by="grid") %>%
+  mutate(group=ifelse(is.na(group),-9,group)) %>%
+  dplyr::select(-X6)
+
+write.table(fam,file = "cleanchr_qc_plink2.fam",col.names = FALSE,row.names = FALSE,sep = "\t",quote = FALSE)
+
+#annotation
+library(tidyverse)
+# library(BSgenome.Hsapiens.UCSC.hg19)
+genome <- BSgenome.Hsapiens.UCSC.hg19
+
+#read in significant snp information file
+snpinfo <- read_delim("GWAS_Kidney_diagnosis_surgVSnonsurg.bim",delim = "\t") %>% 
+  `colnames<-`(c("CHR","SNP","No","POS","Minor","Major")) %>%
+  # dplyr::rename(CHR=`#CHROM`,SNP=ID,Minor=ALT,Major=REF) %>%
+  dplyr::select(CHR,SNP,POS,Minor,Major) %>%
+  arrange(CHR, POS) %>%
+  data.frame()
+
+#to get the reference allele
+chrs <- seqnames(Hsapiens)[as.numeric(names(table(snpinfo$CHR)))]
+sigsnpref=c()
+k=1
+m=1
+for (i in as.numeric(names(table(snpinfo$CHR)))) {
+  for (j in k:(k+nrow(snpinfo[which(snpinfo$CHR==i),])-1) ) {
+    sigsnpref = c(sigsnpref,as.character(getSeq(Hsapiens, names=chrs[m], start=snpinfo[j,"POS"], end=snpinfo[j,"POS"])))
+  }
+  k=k+nrow(snpinfo[which(snpinfo$CHR==i),])
+  m=m+1
+}
+sigsnpref.dat <- data.frame(sigsnpref)
+snpinfo$ref <- sigsnpref.dat$sigsnpref
+snpinfo$Minor <- as.character(snpinfo$Minor)
+snpinfo$Major <- as.character(snpinfo$Major)
+snpinfo$ref <- as.character(snpinfo$ref)
+
+#check unmatch
+snpinfo[which((snpinfo$Major)!=(snpinfo$ref)),"Minor"] <- snpinfo[which((snpinfo$Major)!=(snpinfo$ref)),"Major"]
+snpinfo$Major <- snpinfo$ref
+
+#prepare the .avinput file
+snpinfo$SNP <- snpinfo$POS
+snpinfo$Alt <- snpinfo$Minor
+snpinfo=snpinfo[,c(1,2,3,6,7)]
+colnames(snpinfo)=c("CHR","Start","End","Ref","Alt")
+write.table(snpinfo,"GWAS_Kidney_diagnosis_surgVSnonsurg.avinput",
+            row.names = FALSE,col.names=FALSE,sep = "\t",quote = FALSE)
+
+#result
+annotation=read.csv("GWAS_Kidney_diagnosis_surgVSnonsurg.hg19_multianno.csv",header = TRUE)
+annotation$BP=annotation$Start
+colnames(annotation)[1]="CHR"
+sigsnps<- read_delim("GWAS_Kidney_diagnosis_surgVSnonsurg",delim = "\t") %>% arrange(P)
+# colnames(sigsnps) <- colnames(snpinfo)
+colnames(sigsnps)[1] <- "CHR"
+colnames(sigsnps)[2] <- "BP"
+combine_annotation=merge(sigsnps,annotation,by.x=c("CHR","BP"),by.y=c("CHR","BP"),sort = FALSE)
+write.table(combine_annotation,"GWAS_Kidney_diagnosis_surgVSnonsurg_annotation.txt",sep = "\t",
+            row.names = FALSE,col.names = TRUE,quote = FALSE)
+```
+
+### GWAS Summary Statitistics(diagnosis)
+
+```{r, warning=FALSE,message=FALSE}
+library(knitr)
+gwas_ks001 <- read.table("GWAS_Kidney_diagnosis_surgVSnonsurg_annotation.txt",header = TRUE,sep = "\t")
+gwas_ks001 <- gwas_ks001[order(gwas_ks001$P),c(-16)]
+gwas_result <- gwas_ks001[,c(1,2,3,4,6,10,12,15,21)]
+gwas_result$L95 <- paste0("[",round(gwas_ks001$L95,2),",",round(gwas_ks001$U95,2),"]")
+colnames(gwas_result) <- c("Chr","Position","Snp","Ref","Minor","OR","95% CI","Pvalue","Gene")
+gwas_result$OR <- round(gwas_result$OR,2)
+gwas_result$Pvalue <- format(gwas_result$Pvalue, digits=2)
+kable(gwas_result,row.names = FALSE)
+```
+
+\newpage
+
+## Time-to-event Analysis Figures
+
+```{r, warning=FALSE,message=FALSE}
+#question1: shall the time period between the 1st and 2nd surgery code be at least 90 days?
+#question2: for some patients, time period between 1st and 2nd or 1st and 3rd ... might be smaller than 90 days, shall we treat the occurrence of surgery with the date that greater than 90 days as the 2nd surgery?
+#question3: for those censored data, what is the end date to calculate the time? current date?
+
+## relationship of UMOD status and time to event for kidney stone surgery #2, UMOD status as the independent variable, #2 surgery as the outcome
+#timeline data
+library(dplyr)
+library(readr)
+library(tidyverse)
+#restrict time window to 5 years
+time_event_dat <- read_delim("KS.CPT.GRID_92k.Jun2021.csv",delim = ",",col_names = FALSE) %>% 
+  dplyr::select(X1:X5) %>%
+  dplyr::rename(grid=X1,Date1=X2,CPT1=X3,Date2=X4,CPT2=X5) %>%
+  mutate(Date1=as.Date(Date1),Date2=as.Date(Date2)) %>%
+  mutate(time=as.integer(Date2-Date1)) %>%
+  mutate(time=ifelse(time<=90,NA,time)) %>%
+  mutate(status=ifelse(is.na(time),0,1))
+  
+#calculate the last EHR date for those censored patients
+time_event_dat <- read_delim("Demographics.03.GRID_92k.Jun2021.csv",delim = ",") %>% 
+  filter(GRID %in% time_event_dat$grid) %>%
+  dplyr::rename(grid=GRID) %>%
+  # select(grid,lastRecordDate) %>%
+  right_join(.,time_event_dat, by="grid") %>%
+  mutate(time=ifelse(is.na(time),lastRecordDate-Date1,time)) %>%
+  mutate(time=as.integer(time/30)) %>%
+  mutate(status120=ifelse((time>120) & (status==1),0,status)) %>%
+  mutate(time120=ifelse(time>120,120,time)) %>%
+  mutate(status=ifelse((time>60) & (status==1),0,status)) %>%
+  mutate(time=ifelse(time>60,60,time))
+  
+  
+#snp data: 11 snps on UMOD gene
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% time_event_dat$grid) %>%
+  dplyr::rename(grid=FID)
+
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+for(i in 7:18) {
+  UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+}
+
+time_event_dat <- time_event_dat %>%
+  left_join(.,UMOD_snps,by="grid")
+  
+# colnames(time_event_dat)[18:28] <- paste0("snp",1:11)
+
+# time_event_dat <- time_event_dat[,-(3:6)]
+# write.table(time_event_dat,file="UMOD_snps_KS.csv",sep = ",",col.names = T,row.names = FALSE,quote = FALSE)
+
+# time_event_dat_long_cpt <- time_event_dat %>%
+#   # select(-X2,-X4,-X6,-X8,-X10,-X12,-X14,-X16,-X18,-X20,-X22,-X24,-X26,-X28,-X30,-X32,-X34,-X36,-X38) %>%
+#   # gather(CPT_index,CPT,X3,X5,X7,X9,X11,X13,X15,X17,X19,X21,X23,X25,X27,X29,X31,X33,X35,X37,X39) %>%
+#   select(-X2,-X4) %>%
+#   gather(CPT_index,CPT,X3,X5) %>%
+#   filter(!is.na(CPT))
+# time_event_dat_long_date <- time_event_dat %>%
+#   # select(-X3,-X5,-X7,-X9,-X11,-X13,-X15,-X17,-X19,-X21,-X23,-X25,-X27,-X29,-X31,-X33,-X35,-X37,-X39) %>%
+#   # gather(Date_index,Date,X2,X4,X6,X8,X10,X12,X14,X16,X18,X20,X22,X24,X26,X28,X30,X32,X34,X36,X38) %>%
+#   select(-X3,-X5) %>%
+#   gather(Date_index,Date,X2,X4) %>%
+#   filter(!is.na(Date))
+# time_event_dat_long <- time_event_dat_long_cpt %>% 
+#   select(-CPT_index) %>%
+#   add_column(Date=time_event_dat_long_date$Date) %>%
+#   rename(grid=X1) %>%
+#   mutate(Date=as.Date(as.character(Date))) %>%
+#   arrange(grid,Date)
+# time_event_dat[,18:29] <- lapply(time_event_dat[,18:29], factor)
+```
+
+## KM plot
+
+```{r,warning=FALSE,message=FALSE}
+## KM plot
+library("survminer")
+library(survival)
+
+# for(i in colnames(time_event_dat)[18:28]){
+#   
+#   km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", i)), data = time_event_dat)
+#   km.surv <- ggsurvplot(km.fit, 
+#            data = time_event_dat,
+#            size = 1,                 # change line size
+#   palette =
+#     c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+#   conf.int = FALSE,          # Add confidence interval
+#   pval = TRUE,              # Add p-value
+#   risk.table = TRUE,        # Add risk table
+#   # risk.table.col = "strata",# Risk table color by groups
+#   # fun = "event",
+#   legend.labs =
+#    c("0","1","2"),    # Change legend labels
+#   risk.table.height = 0.25, # Useful to change when you have multiple groups
+#   ggtheme = theme_bw()
+#            )+
+#   labs(
+#     title = i
+#   ) +
+#   ylab("Occurrence of #2 Surgery")
+#   print(km.surv)
+# }
+
+# colnames_snp <- colnames(time_event_dat)[18:28]
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20353815")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("CC","CT","TT"),    # Change legend labels (minor allele:00)
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20353815"
+  ) +
+  ylab("Surgical recurrence probability") +
+  xlab("Months")
+
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20356326")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TG","GG"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20356326"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20357255")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20357255"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20358248")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("CC","CA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20358248"
+  ) +
+  ylab("OSurgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20359633")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20359633"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snprs13335818")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs13335818"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snprs71149135")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("2 minor alleles","1 minor allele","0 minor allele"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs71149135"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snprs111285796")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("2 minor alleles","1 minor allele","0 minor allele"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs111285796"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20361441")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("GG","GA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20361441"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snp16_20361491")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20361491"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snprs35747824")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs35747824"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", "snprs77924615")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("AA","AG","GG"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs77924615"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+ggsave("recurrence_rs20359633.jpg",width = 8,height = 6)
+```
+
+## 120 months
+
+```{r,warning=FALSE,message=FALSE}
+## KM plot
+library("survminer")
+library(survival)
+
+# for(i in colnames(time_event_dat)[18:28]){
+#   
+#   km.fit <- survfit(as.formula(paste0("Surv(time, status) ~ ", i)), data = time_event_dat)
+#   km.surv <- ggsurvplot(km.fit, 
+#            data = time_event_dat,
+#            size = 1,                 # change line size
+#   palette =
+#     c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+#   conf.int = FALSE,          # Add confidence interval
+#   pval = TRUE,              # Add p-value
+#   risk.table = TRUE,        # Add risk table
+#   # risk.table.col = "strata",# Risk table color by groups
+#   # fun = "event",
+#   legend.labs =
+#    c("0","1","2"),    # Change legend labels
+#   risk.table.height = 0.25, # Useful to change when you have multiple groups
+#   ggtheme = theme_bw()
+#            )+
+#   labs(
+#     title = i
+#   ) +
+#   ylab("Occurrence of #2 Surgery")
+#   print(km.surv)
+# }
+
+# colnames_snp <- colnames(time_event_dat)[18:28]
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20353815")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("CC","CT","TT"),    # Change legend labels (minor allele:00)
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20353815"
+  ) +
+  ylab("Surgical recurrence probability") +
+  xlab("Months")
+
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20356326")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TG","GG"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20356326"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20357255")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20357255"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20358248")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("CC","CA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20358248"
+  ) +
+  ylab("OSurgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20359633")), data = time_event_dat)
+cph = coxph(Surv(time120, status120) ~ snp16_20359633+Sex+Race+Ethnicity, data = time_event_dat)
+cph_sum = summary(cph)
+knitr::kable(data.frame(cph_sum$coefficients))
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20359633"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snprs13335818")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs13335818"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snprs71149135")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("2 minor alleles","1 minor allele","0 minor allele"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs71149135"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snprs111285796")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("2 minor alleles","1 minor allele","0 minor allele"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs111285796"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20361441")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("GG","GA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20361441"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snp16_20361491")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TC","CC"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_16:20361491"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snprs35747824")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("TT","TA","AA"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs35747824"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+
+km.fit <- survfit(as.formula(paste0("Surv(time120, status120) ~ ", "snprs77924615")), data = time_event_dat)
+ggsurvplot(km.fit, 
+           data = time_event_dat,
+           size = 1,                 # change line size
+           break.x.by = 12,
+  palette =
+    c("#E7B800", "#2E9FDF","#59b03c"),# custom color palettes
+  conf.int = FALSE,          # Add confidence interval
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  tables.theme = clean_theme(),
+  # risk.table.col = "strata",# Risk table color by groups
+  # fun = "event",
+  legend.labs =
+   c("AA","AG","GG"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw()
+           )+
+  labs(
+    title = "snp_rs77924615"
+  ) +
+  ylab("Surgical recurrence probability")+
+  xlab("Months")
+ggsave("recurrence120_rs20359633.jpg",width = 8,height = 6)
+
+time_event_dat = time_event_dat %>% mutate(Ethnicity=factor(Ethnicity,levels = c("U","HL","NH")))
+cph = coxph(Surv(time, status) ~ snp16_20359633+Sex+Race+Ethnicity, data = time_event_dat)
+cph_sum = summary(cph)
+knitr::kable(data.frame(cph_sum$coefficients),digits = 2)
+```
+
+\newpage
+
+## Violin Plot
+
+*Notation: 2 means 2 major alleles; 1 means 1 major allele; 0 means 0 major allele.* <!-- ##x: snp(0,1,2) y: age -->
+
+### CPT01
+
+```{r, warning=FALSE,message=FALSE}
+## age at 1st surgery onset
+age_cpt <- read_delim("GRID.AgeKSOnsetCPT01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+age_icd <- read_delim("GRID.AgeKSOnsetICD01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+
+## violin plot
+# time_event_dat<- time_event_dat %>%
+#   left_join(.,age_cpt,by="grid") %>%
+#   dplyr::rename(age_cpt=AGE)
+
+#snp data: 11 snps on UMOD gene
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% age_icd$grid) %>%
+  dplyr::rename(grid=FID)
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+#2 means 2 major alleles; 1 means 1 major allele; 0 means 0 major allele.
+for(i in 7:18) {
+  UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+}
+age_cpt_snps <- age_cpt %>%
+  left_join(.,UMOD_snps[,c(1,7:18)],by="grid")
+age_cpt_snps[,3:14] <- lapply(age_cpt_snps[,3:14], factor)
+  
+expl <- colnames(age_cpt_snps)[3:14]
+expl <- set_names(expl)
+my_comparisons <- list( c("0", "1"), c("0","2"), c("1", "2") )
+violin_func <- function(x) {
+  violin_dat <- age_cpt_snps %>%
+    filter(!is.na(!!sym(x)))
+  ggplot(violin_dat, aes_string(x=x, y="AGE",color=x)) + 
+  geom_violin(trim=FALSE)+
+  geom_boxplot(width=0.1, fill="white")+
+  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 120)  +   # Add global p-value
+  scale_color_manual(values=c("#E7B800", "#2E9FDF","#59b03c")) +
+   ylab("Age at onset (CPT)")+xlab(x)+ggtitle(x)+
+  theme_bw()+
+  # theme(legend.position = "none")+
+  theme(axis.text = element_text(size=20))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 20,hjust = 0.5))+
+  theme(
+    # panel.grid.major = element_blank(), 
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5))
+}
+
+p <- purrr::map(expl, ~violin_func(x=.x))
+for(i in 1:12){
+  print(p[[i]])
+}  
+p[[5]]
+  ggsave("CPT_rs20359633.jpg",width = 8,height = 6)
+```
+
+### ICD
+
+```{r, warning=FALSE,message=FALSE}
+## age at 1st surgery onset
+age_cpt <- read_delim("GRID.AgeKSOnsetCPT01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+age_icd <- read_delim("GRID.AgeKSOnsetICD01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+
+## violin plot
+# time_event_dat<- time_event_dat %>%
+#   left_join(.,age_icd,by="grid") %>%
+#   dplyr::rename(age_icd=AGE)
+
+#snp data: 11 snps on UMOD gene
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% age_icd$grid) %>%
+  dplyr::rename(grid=FID)
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+for(i in 7:18) {
+  UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+}
+age_icd_snps <- age_icd %>%
+  left_join(.,UMOD_snps[,c(1,7:18)],by="grid")
+age_icd_snps[,3:14] <- lapply(age_icd_snps[,3:14], factor)
+
+expl <- colnames(age_icd_snps)[3:14]
+expl <- set_names(expl)
+my_comparisons <- list( c("0", "1"), c("0","2"), c("1", "2") )
+violin_func <- function(x) {
+  violin_dat <- age_icd_snps %>%
+    filter(!is.na(!!sym(x)))
+  ggplot(violin_dat, aes_string(x=x, y="AGE",color=x)) + 
+  geom_violin(trim=FALSE)+
+  geom_boxplot(width=0.1, fill="white")+
+  stat_compare_means(comparisons = my_comparisons,method="wilcox.test")+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 120,method="anova")  +   # Add global p-value
+  scale_color_manual(values=c("#E7B800", "#2E9FDF","#59b03c")) +
+   ylab("Age at onset (ICD)")+xlab(x)+ggtitle(x)+
+  theme_bw()+
+  # theme(legend.position = "none")+
+  theme(axis.text = element_text(size=20))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 20,hjust = 0.5))+
+  theme(
+    # panel.grid.major = element_blank(), 
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5))
+}
+
+p <- purrr::map(expl, ~violin_func(x=.x))
+for(i in 1:12){
+  print(p[[i]])
+}  
+
+p[[5]]
+ggsave("ICD_rs20359633.jpg",width = 8,height = 6)
+```
+
+\newpage
+
+### Cohort effect
+
+### Age at 1st surgery onset (CPT) as the outcome;
+
+Linear Mixed effect model: Age at onset $\sim Snp(continous) + Sex + Race + Ethnicity + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+## as for survival analysis (surgical recurrence: 1st occurrence to 2nd recurrence)
+demo <- read_delim("Demographics.04.GRID_92k.cut.Aug2021.csv",delim = ",") %>% dplyr::rename(grid=GRID)
+demo <- demo %>% 
+mutate(Race=ifelse(Race %in% c("A","I","U"),"Other",Race))
+#read in snp files
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% time_event_dat$grid) %>%
+  dplyr::rename(grid=FID)
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+for(i in 7:18) {
+  UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+}
+## read in age at 1st surgery onset
+age_cpt <- read_delim("GRID.AgeKSOnsetCPT01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+age_icd <- read_delim("GRID.AgeKSOnsetICD01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+## cohort analysis
+cohort_dat <- age_cpt %>%
+  left_join(.,demo,by="grid") %>%
+  left_join(.,UMOD_snps,by="grid") %>%
+  mutate(birthYear=as.numeric(str_sub(birthDate,1,4))) %>%
+  mutate(Sex=factor(Sex,levels = c("F","M")),
+         Race=as.factor(Race),
+         Ethnicity=factor(Ethnicity,levels = c("U","HL","NH"))) %>%
+  mutate(cohort_birth=case_when(birthYear < 1930 & (birthYear >= 1920) ~ 1,
+                                birthYear < 1940 & (birthYear >= 1930) ~ 2,
+                                birthYear < 1950 & (birthYear >= 1940) ~ 3,
+                                birthYear < 1960 & (birthYear >= 1950) ~ 4,
+                                birthYear < 1970 & (birthYear >= 1960) ~ 5,
+                                birthYear < 1980 & (birthYear >= 1970) ~ 6,
+                                birthYear < 1990 & (birthYear >= 1980) ~ 7,
+                                birthYear < 2000 & (birthYear >= 1990) ~ 8,
+                                birthYear < 2010 & (birthYear >= 2000) ~ 9,
+                                birthYear < 2020 & (birthYear >= 2010) ~ 10)) %>%
+  mutate(cohort_birth=factor(cohort_birth))
+
+library(lme4)
+library(lmerTest)
+cohort_func <- function(snp) {
+  # fit <- glm(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + cohort_birth")))
+  fit <- lmer(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:5] <- sapply(fit_result[,1:5], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+knitr::kable(fit_result[[i]])
+```
+
+Linear Mixed effect model: Age at onset $\sim Snp(continous) + Sex + Race + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_func <- function(snp) {
+  # fit <- glm(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + cohort_birth")))
+  fit <- lmer(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:5] <- sapply(fit_result[,1:5], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+Linear model: Age at onset $\sim Snp(continous) + Sex + Race + cohort.birth$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_func_lm <- function(snp) {
+  fit <- lm(as.formula(paste0("AGE ~ ", snp)),data=cohort_dat)
+  # fit <- lmer(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:4] <- sapply(fit_result[,1:4], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+fit_result <- purrr::map(expl, ~cohort_func_lm(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+Linear Mixed effect model: Age at onset $\sim Snp(categorical) + Sex + Race + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_dat[,14:25] <- lapply(cohort_dat[,14:25], factor)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+### Age at 1st surgery onset (ICD)
+
+Age at onset: $\sim Snp(continuous) + Sex + Race +Ethnicity + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_dat <- cohort_dat %>%
+  left_join(.,age_icd %>% rename(AGE_icd=AGE),by="grid")
+
+cohort_func <- function(snp) {
+  
+  fit <- lmer(as.formula(paste0("AGE_icd ~ ", snp, " + Sex + Race + Ethnicity + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:5] <- sapply(fit_result[,1:5], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+cohort_dat[,14:25] <- lapply(cohort_dat[,14:25], as.numeric)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+Linear Mixed effect model: Age at onset $\sim Snp(continous) + Sex + Race + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_func <- function(snp) {
+  # fit <- glm(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + cohort_birth")))
+  fit <- lmer(as.formula(paste0("AGE_icd ~ ", snp, " + Sex + Race + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:5] <- sapply(fit_result[,1:5], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+Linear model: Age at onset $\sim Snp(continous) + Sex + Race + cohort.birth$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_func_lm <- function(snp) {
+  fit <- lm(as.formula(paste0("AGE_icd ~ ", snp, " + Sex + Race + cohort_birth")),data=cohort_dat)
+  # fit <- lmer(as.formula(paste0("AGE ~ ", snp, " + Sex + Race + Ethnicity + (1|cohort_birth)")), data = cohort_dat)
+  fit_sum <- summary(fit)
+  fit_result <- fit_sum$coefficients
+  fit_result[,1:4] <- sapply(fit_result[,1:4], function(x) round(x,2))
+  fit_result
+  
+}
+expl <- colnames(cohort_dat)[14:25]
+expl <- set_names(expl)
+fit_result <- purrr::map(expl, ~cohort_func_lm(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+```
+
+Age at onset: $\sim Snp(categorical) + Sex + Race +Ethnicity + (1|cohort.birth)$
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+cohort_dat[,14:25] <- lapply(cohort_dat[,14:25], factor)
+fit_result <- purrr::map(expl, ~cohort_func(snp=.x))
+for(i in 1:11){
+  print(knitr::kable(fit_result[[i]]))
+  cat("\n")
+}
+
+```
+
+\newpage
+
+## Equivalence Test
+
+In hypothesis testing, the lack of evidence to reject the null hypothesis test does not mean we can accept the null hypothesis. It is very possible that the test had insufficient power to result in a rejection of the null hypothesis (sample size or large variability in the data). In this kidney stone case, we discover significant association of risk alleles (minor allele) with Kidney Stone diagnosis. However, for the severity analysis with three outcomes: 1) age at first kidney stone diagnosis; 2) age at first surgical procedure among those who had any surgery; 3) time to second surgery from first surgical procedure, we did not find significant association of risk alleles with these outcomes but we couldn't state that different risk allele groups having the same effect on these time to event outcomes.
+
+In GWAS study, we identify significant association of risk allele with Kidney Stone diagnosis and minor allele is the risk allele. In the equivalence test, we grouped individuals into two groups with one group having at least one minor allele, and another group do not have any minor allele. We need to specify how large of the age/time difference among different risk allele groups would represent a difference. The below using the most significant SNP: 16:20359633 as an example to illustrate.
+
+The equivalence bound was set to specified age/time difference that at least the specified years/months difference of mean age/mean time between allele groups would represent a difference, which equals a difference of converted value given the sample sizes and a pooled standard deviation (details were shown below).
+
+*Notation:* Conversion of the effect size: $\frac{m1-m2}{\sqrt{\frac{(n1-1)SD_1^2+(n2-1)SD_2^2}{n1+n2-2}}}$
+
+### age at first surgical procedure among those who had any surgery
+
+<!-- The equivalence bound was set to the effect size that the study had 95% power to detect, which means the equivalence bound is d = 0.25. Then we applied independent Groups Welch’s Equivalence Test. -->
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+library(TOSTER)
+library(pwr)
+age_cpt <- read_delim("GRID.AgeKSOnsetCPT01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+age_icd <- read_delim("GRID.AgeKSOnsetICD01.csv",delim = ",") %>%dplyr::rename(grid=FID)
+
+#snp data: 11 snps on UMOD gene
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% age_icd$grid) %>%
+  dplyr::rename(grid=FID)
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+for(i in 7:18) {
+  UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+}
+age_icd_snps <- age_icd %>%
+  left_join(.,UMOD_snps[,c(1,7:18)],by="grid")
+age_icd_snps[,3:14] <- lapply(age_icd_snps[,3:14], factor)
+age_cpt_snps <- age_cpt %>%
+  left_join(.,UMOD_snps[,c(1,7:18)],by="grid")
+age_cpt_snps[,3:14] <- lapply(age_cpt_snps[,3:14], factor)
+
+
+# group mean and sd
+group_dat = age_cpt_snps %>%
+  filter(!is.na(snp16_20359633)) %>%
+  mutate(snp16_20359633=ifelse(snp16_20359633==2,0,1)) %>%
+  group_by(snp16_20359633) %>%
+  summarize(
+  mean = mean(AGE, na.rm=TRUE),
+  sd = sd(AGE),
+  n = n()
+) 
+group_dat %>%
+  knitr::kable()
+
+# pwr.t2n.test(n1 = 626, n2 = 363, power = 0.95)
+
+```
+
+The equivalence bound was set from 1 to 5 years difference, Using a TOST equivalence test with alpha = 0.05, assuming non-equal variances. We can reject effects that more extreme than d = 0.22 when equivalence bound was set to 4 years.
+
+```{r,warning=FALSE,message=FALSE,results = "asis"}
+
+for(i in 1:5){
+  cat("\n")
+  print(paste0("Equivalence bound:",i,"\n"))
+  effect_size = i/sqrt(((group_dat$n[1]-1)*group_dat$sd[1]^2+(group_dat$n[2]-1)*group_dat$sd[2]^2)/(group_dat$n[1]+group_dat$n[2]-2))
+  TOSTtwo(m1=group_dat$mean[1],m2=group_dat$mean[2],sd1=group_dat$sd[1],sd2=group_dat$sd[2],n1=group_dat$n[1],n2=group_dat$n[2],low_eqbound_d=-effect_size, high_eqbound_d=effect_size, alpha = 0.05, var.equal=FALSE)
+}
+
+```
+
+### age at first kidney stone diagnosis
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+library(TOSTER)
+library(pwr)
+# group mean and sd
+# group mean and sd
+group_dat = age_icd_snps %>%
+  filter(!is.na(snp16_20359633)) %>%
+  mutate(snp16_20359633=ifelse(snp16_20359633==2,0,1)) %>%
+  group_by(snp16_20359633) %>%
+  summarize(
+  mean = mean(AGE, na.rm=TRUE),
+  sd = sd(AGE),
+  n = n()
+) 
+group_dat %>%
+  knitr::kable()
+
+# pwr.t2n.test(n1 = 626, n2 = 363, power = 0.95)
+
+```
+
+The equivalence bound was set from 1 to 5 years difference, Using a TOST equivalence test with alpha = 0.05, assuming non-equal variances. We can not state that two allele groups are equivalent on the mean age at first kidney stone diagnosis.
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+
+for(i in 1:5){
+  cat("\n")
+  print(paste0("Equivalence bound:",i,"\n"))
+  effect_size = i/sqrt(((group_dat$n[1]-1)*group_dat$sd[1]^2+(group_dat$n[2]-1)*group_dat$sd[2]^2)/(group_dat$n[1]+group_dat$n[2]-2))
+  TOSTtwo(m1=group_dat$mean[1],m2=group_dat$mean[2],sd1=group_dat$sd[1],sd2=group_dat$sd[2],n1=group_dat$n[1],n2=group_dat$n[2],low_eqbound_d=-effect_size, high_eqbound_d=effect_size, alpha = 0.05, var.equal=FALSE)
+}
+
+```
+
+### time to second surgery from first surgical procedure
+
+The equivalence bound was set to 3 months that at least 3 months difference of time between allele groups would represent a difference, which equals a difference of 0.1356 given the sample sizes and a pooled standard deviation (details were shown below).
+
+*Notation:* Conversion of the effect size: $\frac{m1-m2}{\sqrt{\frac{(n1-1)SD_1^2+(n2-1)SD_2^2}{n1+n2-2}}}$
+
+Using a TOST equivalence test with alpha = 0.05, assuming non-equal variances, and equivalence bounds of d = -0.1356 and d = 0.1356 is significant. We can reject effects that more extreme than d = 0.1356.
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+library(TOSTER)
+library(pwr)
+# group mean and sd
+group_dat = time_event_dat %>%
+  filter(!is.na(snp16_20359633)) %>%
+  mutate(snp16_20359633=ifelse(snp16_20359633==2,0,1)) %>%
+  group_by(snp16_20359633) %>%
+  summarize(
+  mean = mean(time, na.rm=TRUE),
+  sd = sd(time),
+  n = n()
+) 
+group_dat %>%
+  knitr::kable()
+
+# pwr.t2n.test(n1 = 626, n2 = 363, power = 0.95)
+
+#effect size
+3/sqrt(((group_dat$n[1]-1)*group_dat$sd[1]^2+(group_dat$n[2]-1)*group_dat$sd[2]^2)/(group_dat$n[1]+group_dat$n[2]-2))
+
+TOSTtwo(m1=group_dat$mean[1],m2=group_dat$mean[2],sd1=group_dat$sd[1],sd2=group_dat$sd[2],n1=group_dat$n[1],n2=group_dat$n[2],low_eqbound_d=-0.1356, high_eqbound_d=0.1356, alpha = 0.05, var.equal=FALSE)
+```
+
+## Stone Composition and 24-hour Urine comparison
+
+### Data Dictionary
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+subgwas_dat = read_delim("Table2.SA.01.csv",delim = ",")
+subgwas_major_uric = read_delim("SDgold.03a.casesMajUA.csv",delim = ",") %>% rename(MajUricAcid=Case1Control2Exclude3)
+subgwas_dat = subgwas_dat %>%
+  left_join(.,subgwas_major_uric,by="GRID") %>%
+  dplyr::select(-AnyUricAcid) %>% 
+  mutate(MajUricAcid=ifelse(MajUricAcid==1,1,0))
+
+var_dat = read_delim("Table2.LL.01.csv",delim = ",")
+
+dat_dictionary = tibble(variable = c(colnames(subgwas_dat)[3:11],colnames(var_dat)[3:19]),
+                        description = c(c("?","Majority Calcium Oxalate Dihydrate",
+                                            "?","?","Uric Acid","Any Brushite","Any Carbonate Apatite","Any Struvite","Any Cystine"),
+                                            c("urine volume","calcium","oxalate","citrate","pH","uric acid","sodium",
+                                              "potassium","?","?","ammonium","chloride","sulfate","creatinine/kg",
+                                              "calcium oxalate supersaturation","calcium phosphate supersaturation",
+                                              "uric acid supersaturation")))
+
+knitr::kable(dat_dictionary,caption = "Data Dictionary")
+```
+
+### 24-hour urine
+
+ANOVA test was conducted to identify if there is a statistically significant difference among three allele status groups by testing means and variance. Based on the results, there is at least one allele group with mean of calcium, uric acid, P24? or sulfate is significantly different with other allele groups.
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+pvalue <- function(x, ...) {
+  x <- x[-length(x)]  # Remove "overall" group
+  # Construct vectors of data y, and groups (strata) g
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times=sapply(x, length)))
+  if (is.numeric(y)) {
+    # For numeric variables, perform an ANOVA
+    p <- summary(aov(y ~ g))[[1]][["Pr(>F)"]][1]
+  } else {
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+  }
+  # Format the p-value, using an HTML entity for the less-than sign.
+  # The initial empty string places the output on the line below the variable label.
+  c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+var_name = as.formula(paste0("~",paste(colnames(var_dat)[3:19],collapse = "+"),"|ALLELE"))
+var_dat$ALLELE = factor(var_dat$ALLELE)
+
+tbl <- table1::table1(~VOL24 + CA24 + OX24 + CIT24 + PH + UA24 + NA24 + K24 + MG24 + P24 + 
+                        NH424 + CL24 + SUL24 + CR24KG + SSCAOX + SSCAP + SSUA | ALLELE,
+                      data = var_dat, droplevels = F,overall = F, extra.col=list(`Pvalue`=pvalue),
+                      caption="Table 1: Kidney Stone Measurements") 
+tbl
+
+```
+
+### Kidney or Ureteral Stone Composition
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+subgwas_dat_long = purrr::map_dfr(colnames(subgwas_dat)[3:11], function(x) {
+  
+  col_name = c(x,"ALLELE")
+  subgwas_dat %>%
+    mutate(!!x:=factor(.[[x]])) %>%
+    group_by_at(col_name) %>%
+    dplyr::summarise(n = dplyr::n()) %>%
+    mutate(freq = n / sum(n)) %>%
+    mutate(ALLELE=factor(ALLELE)) %>%
+    dplyr::rename(outcome=x) %>%
+    mutate(variable = x)
+  
+}) %>% ungroup()
+
+#snp data: 11 snps on UMOD gene
+grid <- read_delim("KS001.GWAS.ICDLimit1.Filter0.csv",delim = ",") %>% rename(grid=GRID) %>% filter(Case1Control2Exclude3!=3) %>% rename(case_control=Case1Control2Exclude3)
+UMOD_snps <- read_delim("UMOD_snps.raw",delim = " ") %>%
+  filter(FID %in% grid$grid) %>%
+  dplyr::rename(grid=FID)
+
+colnames(UMOD_snps)[c(7:11,15:16)] <- sub("-.*", "", colnames(UMOD_snps)[c(7:11,15:16)]) 
+colnames(UMOD_snps)[c(12:14,17:18)] <- sub(":.*", "", colnames(UMOD_snps)[c(12:14,17:18)]) 
+colnames(UMOD_snps)[7:18] <- str_replace_all(colnames(UMOD_snps)[7:18], ":", "_")
+colnames(UMOD_snps)[7:18] <- paste0("snp",colnames(UMOD_snps)[7:18])
+# for(i in 7:18) {
+#   UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])] <- ifelse(UMOD_snps[[i]][(UMOD_snps[[i]]==2 | (UMOD_snps[[i]]==0)) & !is.na(UMOD_snps[[i]])]==0,2,0)
+# }
+
+UMOD_snps_long = purrr::map_dfr(colnames(UMOD_snps)[11], function(x) {
+  
+  col_name = c(x,"PHENOTYPE")
+  UMOD_snps %>%
+    dplyr::select(!!x,PHENOTYPE) %>%
+    mutate(!!x:=factor(.[[x]])) %>%
+    group_by_at(col_name) %>%
+    dplyr::summarise(n = dplyr::n()) %>%
+    mutate(freq = n / sum(n)) %>%
+    dplyr::rename(ALLELE=x,outcome=PHENOTYPE) %>%
+    mutate(variable=x) %>%
+    dplyr::select(outcome,ALLELE,n,freq,variable) %>%
+    mutate(outcome=ifelse(outcome==1,0,1))
+  
+}) %>% filter(!is.na(ALLELE))
+
+compare_dat = subgwas_dat_long
+ggplot(compare_dat, aes(x=ALLELE,y=freq)) + 
+  geom_bar(ggplot2::aes(fill = outcome),
+                    # position="dodge",
+                    stat = "identity") +
+    facet_wrap( ~ variable,ncol=10) +
+  # facet_wrap(vars(variable)) +
+  theme_bw()+
+  # theme(legend.position = "none")+
+  # theme(axis.text = element_text(size=20))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 20,hjust = 0.5))+
+  theme(
+    # panel.grid.major = element_blank(), 
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)) +
+  scale_alpha_manual(values = c(1,0.4))
+
+ggplot(compare_dat, aes(x=outcome,y=freq)) + 
+  geom_bar(ggplot2::aes(fill = ALLELE),
+                    # position="dodge",
+                    stat = "identity") +
+    facet_wrap( ~ variable,ncol=10) +
+  # facet_wrap(vars(variable)) +
+  theme_bw()+
+  # theme(legend.position = "none")+
+  # theme(axis.text = element_text(size=20))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 20,hjust = 0.5))+
+  theme(
+    # panel.grid.major = element_blank(), 
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)) +
+  scale_alpha_manual(values = c(1,0.4))
+
+# compare_result = tibble()
+# for(i in seq(1,23,3)){
+#   for(j in 1:1){
+#     chi_result = chisq.test(subgwas_dat_long$n[i:(i+2)],UMOD_snps_long$n[j:(j+2)])
+#     compare_result = rbind(compare_result,tibble(composition=subgwas_dat_long$variable[i],population=UMOD_snps_long$variable[j],
+#                             pvalue=chi_result$p.value))
+#   }
+#   i = i + 3
+# }
+chi_result = tibble()
+for(i in unique(compare_dat$variable)){
+  compare_dat_sub = tibble(outcome_no = compare_dat$freq[compare_dat$variable==i][1:3],
+                           outcome_yes = compare_dat$freq[compare_dat$variable==i][4:6]) %>% 
+    filter(!is.na(outcome_no) & !is.na(outcome_yes))
+  chi_dat = chisq.test(compare_dat_sub)
+  chi_result = rbind(chi_result,tibble(composition=i,pvalue=chi_dat$p.value))
+}
+
+knitr::kable(chi_result)
+
+```
+
+### 4 mutually exclusive groups
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+subgwas_dat_subset = subgwas_dat %>%
+  # dplyr::select(GRID,ALLELE) %>%
+  pivot_longer(cols = MajCaOx:MajUricAcid, names_to = "composition", values_to = "composition_status") %>%
+  mutate(composition=ifelse(composition %in% c("MajCOD","MajCOM","MajCAP","MajUricAcid"),composition,"Other")) %>%
+  filter(composition_status==1) %>%
+  group_by(ALLELE,composition) %>%
+  dplyr::summarise(n = dplyr::n()) %>%
+  mutate(freq = n / sum(n)) %>%
+  ungroup()
+
+ggplot(subgwas_dat_subset, aes(x=ALLELE,y=freq)) + 
+  geom_bar(ggplot2::aes(fill = composition),
+                    # position="dodge",
+                    stat = "identity") +
+  # facet_wrap(vars(variable)) +
+  theme_bw()+
+  # theme(legend.position = "none")+
+  # theme(axis.text = element_text(size=20))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 20,hjust = 0.5))+
+  theme(
+    # panel.grid.major = element_blank(), 
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)) +
+  scale_alpha_manual(values = c(1,0.4))
+
+##chi-square test
+chi_dat = tibble(uric_acid = subgwas_dat_subset$freq[c(1,5,9)],
+                 cap = subgwas_dat_subset$freq[c(2,6,10)],
+                 cod = subgwas_dat_subset$freq[c(3,7,11)],
+                 com = subgwas_dat_subset$freq[c(4,8,12)])
+chisq.test(chi_dat)
+
+```
+
+-   Separate analysis for each type of kidney stone composition
+
+*dominant model*
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+res = tibble()
+for(i in 3:11){
+  subgwas_dat[[i]] = factor(subgwas_dat[[i]])
+  subgwas_dat = subgwas_dat %>% mutate(dominant=ifelse(ALLELE==0,0,1))
+  form = as.formula(paste0(colnames(subgwas_dat)[i],"~ dominant"))
+  model = glm(form,family=binomial(link='logit'),data=subgwas_dat)
+  model_sum = summary(model)
+  res_dat = tibble(composition=colnames(subgwas_dat)[i],
+               estimate=model_sum$coefficients[2,1],
+               pvalue=model_sum$coefficients[2,4])
+  res = rbind(res,res_dat)
+}
+knitr::kable(res,digits = 3,caption = "dominant")
+
+```
+
+*recessive model*
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+res = tibble()
+for(i in 3:11){
+  subgwas_dat[[i]] = factor(subgwas_dat[[i]])
+  subgwas_dat = subgwas_dat %>% mutate(recessive=ifelse(ALLELE==2,1,0))
+  form = as.formula(paste0(colnames(subgwas_dat)[i],"~ recessive"))
+  model = glm(form,family=binomial(link='logit'),data=subgwas_dat)
+  model_sum = summary(model)
+  res_dat = tibble(composition=colnames(subgwas_dat)[i],
+               estimate=model_sum$coefficients[2,1],
+               pvalue=model_sum$coefficients[2,4])
+  res = rbind(res,res_dat)
+}
+knitr::kable(res,digits = 3,caption = "recessive")
+
+```
+
+*additive model*
+
+```{r, warning=FALSE,message=FALSE,results = "asis"}
+res = tibble()
+for(i in 3:11){
+  subgwas_dat[[i]] = factor(subgwas_dat[[i]])
+  subgwas_dat = subgwas_dat %>% mutate(additive=ALLELE)
+  form = as.formula(paste0(colnames(subgwas_dat)[i],"~ additive"))
+  model = glm(form,family=binomial(link='logit'),data=subgwas_dat)
+  model_sum = summary(model)
+  res_dat = tibble(composition=colnames(subgwas_dat)[i],
+               estimate=model_sum$coefficients[2,1],
+               pvalue=model_sum$coefficients[2,4])
+  res = rbind(res,res_dat)
+}
+knitr::kable(res,digits = 3,caption = "additive")
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+

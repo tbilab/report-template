@@ -1,0 +1,2942 @@
+---
+title: "ICI_analysis"
+author:
+- Siwei Zhang
+- Nick Strayer
+- Yaomin Xu
+resource_files:
+- dat_analysis.txt
+- Fullallele.xlsx
+- Fullallele_new.xlsx
+- GWAS_response.csv
+- GWAS_response.png
+- GWAS_toxicity.csv
+- GWAS_toxicity.png
+- HLA_B_MT.xlsx
+- HLA_B_supertype.xlsx
+- ID_match.xlsx
+- KIRligands.xlsx
+- Metadata2.xlsx
+- Metadata.xlsx
+- Metadata2_new.xlsx
+- snps_CSMD1.raw
+- tox_sup.csv
+- tox_sup.txt
+- ICI_result.csv
+- ICI_gene_plot.png
+- ICI_gene_result.csv
+- Dermatologic_type.csv
+- GI_type.csv
+- Liver_type.csv
+- Muscle_type.csv
+- Neuro_type.csv
+- Thyroid_type.csv
+- Joint_type.csv
+- GWAS_toxicity_update.png
+- ICI_toxicity_plot.png
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+runtime: shiny
+---
+
+<br/>
+<br/>
+<br/>
+
+<script src="https://hypothes.is/embed.js" async></script>
+
+# Exploratory Data Analysis 
+
+```{r downloaddata, echo=FALSE}
+xfun::embed_file("dat_analysis_update.txt",text = "Download Clean Data")
+#write.table(dat,file = "dat.csv",row.names = FALSE,col.names = TRUE,sep = ",",quote = FALSE)
+```
+
+
+```{r datacleaning, echo=FALSE, message=FALSE, include=FALSE}
+#source("/proj/PI_PHILLIPS/Projects/ICI/.common/R/source.R")
+library(readxl)
+library(dplyr)
+library(plyr)
+library(knitr)
+library(furniture)
+library(tidyr)
+library(pander)
+library(shiny)
+#library(kableExtra)
+require(MASS)
+require(Hmisc)
+library(stringr)
+library(kableExtra)
+library(broom)
+
+##clean the new data and incorporated with old data. 
+alleledat.new <- read_excel("Fullallele_new.xlsx")
+id_dat <- read_excel("ID_match.xlsx")
+alleledat.new <- alleledat.new %>%
+  dplyr::left_join(id_dat,by="Subject Identifier")
+#sum(is.na(alleledat.new$Tox_ID))
+meta2.new <- read_excel("Metadata2_new.xlsx")
+meta2.new <- meta2.new %>%
+  plyr::rename(c("Subject_ID" = "Subject Identifier")) %>%
+  dplyr::left_join(id_dat,by=c("Subject Identifier","Tox_ID"))
+meta2.new <- meta2.new[(!is.na(meta2.new$`Subject Identifier`)),]
+alleledat.new <- alleledat.new[(!is.na(alleledat.new$`Subject Identifier`)),]
+colnames(meta2.new)[3] <- "Subject_ID"
+colnames(alleledat.new)[1] <- "Subject_ID"
+meta2.new$`Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4 vs. CTLA-4)`[which(meta2.new$`Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4 vs. CTLA-4)` %in% c("CTLA-4","CTLA-4 + BRAF","CTLA-4 + GM-CSF","CTLA-4 + TVEC"))] <- "CTLA-4"
+
+dat.new <- meta2.new %>%
+  plyr::rename(c("Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4 vs. CTLA-4)" = "Treatment_class")) %>%
+  plyr::rename(c("Any Tox? (1=yes, 0=no)" = "Toxicity")) %>%
+  plyr::rename(c("Severe Tox (requiring systemic steroids; 1=yes, 0=no)" = "Severe_tox")) %>%
+  plyr::rename(c("Type of toxicity" = "Type_tox")) %>%
+  plyr::rename(c("Responder? 1=yes, 0=no" = "Responder")) %>%
+  dplyr::select(Tox_ID,Subject_ID,Treatment,Treatment_class,Age,Gender,
+         Toxicity,Severe_tox,Type_tox,Responder) %>%
+  dplyr::inner_join(alleledat.new,by = "Subject_ID") %>%
+  dplyr::mutate_each_(funs(factor),c("Treatment","Treatment_class","Gender","Toxicity","Severe_tox","Type_tox"))
+dat.new$Responder[which(dat.new$Responder=="??")] <- NA
+dat.new$Responder <- as.factor(dat.new$Responder)
+dat.new <- dat.new[!is.na(dat.new$Toxicity),]
+dat.new$Type_tox <- tolower(dat.new$Type_tox)
+colnames(dat.new)[1] <- "Tox_ID"
+dat.new <- dat.new[,-35]
+library(tibble)
+dat.new <- add_column(dat.new,dat.new$Subject_ID,.after=10)
+colnames(dat.new)[11] <- "Subject Identifier"
+
+#a=meta2.new[which(!meta2.new$Subject_ID %in% dat.new$Subject_ID),]
+#b=alleledat.new[which(!alleledat.new$Subject_ID %in% dat.new$Subject_ID),]
+#write.table(a,file="nonoverlap_meta.csv",col.names = TRUE,row.names = FALSE,sep = ",",quote = FALSE)
+
+#===============================================
+#old data
+#meta <- read_excel("Metadata.xlsx")
+#meta <- meta[!is.na(meta$`TOX ID`),]
+meta2 <- read_excel("Metadata2.xlsx")
+meta2 <- meta2[(!is.na(meta2$Tox_ID)) & (!is.na(meta2$Subject_ID)),]
+alleledat <- read_excel("Fullallele.xlsx")
+alleledat <- alleledat[(!is.na(alleledat$Tox_ID)) & (!is.na(alleledat$`Subject Identifier`)),]
+meta2$`Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4)`[which(meta2$`Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4)`=="Ipi + Nivo")] <- "Combination"
+
+dat <- meta2 %>%
+  plyr::rename(c("Treatment class (anti-PD-1 vs. combination PD-1/CTLA-4)" = "Treatment_class")) %>%
+  plyr::rename(c("Any Tox? (1=yes, 0=no)" = "Toxicity")) %>%
+  plyr::rename(c("Severe Tox (requiring systemic steroids; 1=yes, 0=no)" = "Severe_tox")) %>%
+  plyr::rename(c("Type of toxicity" = "Type_tox")) %>%
+  plyr::rename(c("Responder? 1=yes, 0=no" = "Responder")) %>%
+  dplyr::select(Tox_ID,Subject_ID,Treatment,Treatment_class,Age,Gender,
+         Toxicity,Severe_tox,Type_tox,Responder) %>%
+  dplyr::inner_join(alleledat,by = "Tox_ID") %>%
+  dplyr::mutate_each_(funs(factor),c("Treatment","Treatment_class","Gender","Toxicity","Severe_tox","Type_tox"))
+dat$Responder[which(dat$Responder=="??")] <- NA
+dat$Responder <- as.factor(dat$Responder)
+dat <- dat[!is.na(dat$Toxicity),]
+dat$Type_tox <- tolower(dat$Type_tox)
+# type_toxicity <- unlist(strsplit(dat$Type_tox,", "))
+# type_toxicity <- type_toxicity[!duplicated(type_toxicity)]
+# type_toxicity <- type_toxicity[-c(1,22,23)]
+# type_toxicity[59] <- "facial edema"
+
+dat <- rbind(dat,dat.new)
+
+Dermatologic <- c("rash","dermatitis","pruritus","psoriasis","vitiligo")
+GI <- c("colitis","enteritis","gastritis","diarrhea","nausea","duodenitis","dysphagia","mucositis","mouth sores")
+Liver <- c("hepatitis","elevated lfts")
+Muscle <- c("myositis","rhabdomyolysis","myalgias","myocarditis","myesthenia gravis")
+Neuro <- c("encephalitis","limbia encephalitis","aseptic meningitis","peripheral neuropathy","bell's palsy","vision loss","diplopia","facial parasthesias","neuropathy","tremors","myasthenia gravis","encephalitis(fatal)")
+Thyroid <- c("hypothyroid","hyperthyroid","hypothyroidism")
+Joint <- c("ra flare","arthralgia","arthritis","gout flare","dka","adrenal","joint pain","adrenal insufficiency")
+Pneumonitis <- c("pneumonitis")
+  
+dat$Dermatologic <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Dermatologic), function(x) 
+  grep(Dermatologic[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$GI <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(GI), function(x) 
+  grep(GI[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Liver <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Liver), function(x) 
+  grep(Liver[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Muscle <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Muscle), function(x) 
+  grep(Muscle[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Neuro <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Neuro), function(x) 
+  grep(Neuro[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Thyroid <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Thyroid), function(x) 
+  grep(Thyroid[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Joint <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Joint), function(x) 
+  grep(Joint[x],dat$Type_tox,fixed = TRUE)))],1,0)
+dat$Pneumonitis <- ifelse(dat$Tox_ID %in% dat$Tox_ID[unlist(lapply(1:length(Pneumonitis), function(x) 
+  grep(Pneumonitis[x],dat$Type_tox,fixed = TRUE)))],1,0)
+
+dat$Type_tox <- gsub(",","/",dat$Type_tox)
+
+# dat_Pneumonitis <- dat[which(dat$Pneumonitis==1),1:62]
+# write.table(dat_Pneumonitis,file = "dat_Pneumonitis.csv",col.names = TRUE,sep = ",",row.names = FALSE,quote = FALSE)
+
+# dat$Type_tox <- tolower(dat$Type_tox)
+# type_toxicity <- unlist(strsplit(dat$Type_tox,", "))
+# type_toxicity <- type_toxicity[!duplicated(type_toxicity)]
+# type_toxicity <- type_toxicity[-c(1)]
+
+dat.new2 <- read_excel("dat_new2.xlsx")
+
+dat <- rbind(dat,dat.new2)
+
+dat$Treatment_class <- factor(as.character(dat$Treatment_class),levels = c("CTLA-4","Combination","PD-1"))
+  
+write.table(dat,file = "dat_analysis.txt",col.names = TRUE,row.names = FALSE,sep = "\t")
+```
+
+<br/>
+<br/>
+<br/>
+
+```{r demotable,echo=FALSE,fig.width=16}
+dat2 <- dat 
+dat2$Toxicity <- factor(dat2$Toxicity,
+                        levels = c(0,1),
+                        labels = c("Toxicity(No)","Toxicity(Yes)"))
+demotable <- table1(dat2, Gender,Age,Treatment_class,splitby = "Toxicity",total = TRUE)
+knitr::kable(demotable$Table1,caption="Demographic Table") %>%
+  kable_styling() %>%
+  footnote(general="12 patients with subject id 1315, 1093, 1467, 1522, 0403, 0487, 0498, 0515, 0675, 0741, 0767, 0857 have two treatments",
+           general_title = "Note:",
+           footnote_as_chunk = T, title_format = c("italic", "underline"))
+```
+
+<br/>
+<br/>
+<br/>
+
+```{r toxicitytable,echo=FALSE}
+
+dat_long <- dat[,c(1,36:43)] %>%
+  gather(Type_tox_long,Value,-Tox_ID) %>%
+  dplyr::filter(Value==1) %>%
+  mutate_at(c("Type_tox_long"),factor)
+
+dat_long <- dat_long %>%
+  right_join(dat,by="Tox_ID")
+dat3 <- dat_long 
+dat3$Toxicity <-as.factor(dat3$Toxicity)
+tox_table <- table1(dat3, Gender,Age,Treatment_class,Toxicity,splitby = "Type_tox_long")
+tox_table <- as.data.frame(t(tox_table[[1]][,-1]))
+colnames(tox_table) <- c("Sample Size","","Gender(Female)","Gender(Male)","","Age","","Treatment(CTLA-4)","Treatment(Combination)","Treatment(PD-1)")
+
+tox_table=tox_table[,c(1,3,4,6,8,9,10)]
+
+knitr::kable(tox_table,row.names = NA,caption = "Toxicity Type Table") %>%
+  kable_styling()
+
+dat <- dat[,c(1:27,36:43)]
+
+for(i in 28:35){
+  dat_toxicity <- dat[dat[[i]]==1,c(1,2,4,7,8,10,14:27)]
+  write.table(dat_toxicity,file = paste0(colnames(dat)[i],".txt"),col.names = T,
+              row.names = F,sep = "\t",quote = F)
+}
+# saveRDS(dat,file = "cleandatbefore.rds")
+```
+
+<br/>
+<br/>
+<br/>
+
+
+```{r toxicitytable_update,echo=FALSE}
+tox.update <- read_excel("toxicity_update.xlsx")
+tox.list <- strsplit(tox.update$toxicity,",")
+dat.tox <- dat
+
+for(i in 1:length(tox.list)){
+  tox_vec <- c()
+  for (j in 1:length(tox.list[[i]])) {
+    tox_vec <- c(tox_vec,grep(tox.list[[i]][j],dat.tox$Type_tox,fixed = TRUE))
+  }
+  dat.tox[,tox.update$toxicity_type[i]] <- ifelse(row.names(dat.tox) %in% unique(tox_vec),1,0)
+}
+
+dat_long2 <- dat.tox[,c(1,36:60)] %>%
+  gather(Type_tox_long,Value,-Tox_ID) %>%
+  dplyr::filter(Value==1) %>%
+  mutate_at(c("Type_tox_long"),factor)
+
+dat_long2 <- dat_long2 %>%
+  right_join(dat.tox,by="Tox_ID")
+
+tox_table2 <- table1(dat_long2, Gender,Age,Treatment_class,splitby = "Type_tox_long")
+tox_table2 <- as.data.frame(t(tox_table2[[1]][,-1]))
+colnames(tox_table2) <- c("Sample Size","","Gender(Female)","Gender(Male)","","Age","","Treatment(CTLA-4)","Treatment(Combination)","Treatment(PD-1)")
+
+tox_table2=tox_table2[,c(1,3,4,6,8,9,10)]
+
+knitr::kable(tox_table2,row.names = NA,caption = "Toxicity Type Table Update") %>%
+  kable_styling()
+
+write.table(dat.tox,file = "dat_analysis_update.txt",col.names = TRUE,row.names = FALSE,sep = "\t")
+
+# library(xlsx)
+# hla_tox_update <- list()
+# for(i in 36:50){
+#   hla_tox_update[[i-35]] <- dat.tox[dat.tox[[i]]==1,c(1,2,4,7,8,10,14:27)]
+# }
+# colnames(dat.tox)[36]
+# 
+# write.xlsx(hla_tox_update[[1]], file = "HLA_tox_update.xlsx",
+#       sheetName = colnames(dat.tox)[36], append = FALSE)
+# for(i in 37:50){
+#   write.xlsx(hla_tox_update[[i-35]], file = "HLA_tox_update.xlsx",
+#       sheetName = colnames(dat.tox)[i], append = TRUE)
+# }
+```
+<br/>
+<br/>
+<br/>
+
+# Email(Lists of Specific Questions)
+
+***In this part, I will keep track of the questions in the email and make a list of these questions***
+
+## HLA-DPB1*04:01 carriage
+
+```{r HLA.DPB1,echo=FALSE,warning=FALSE,message=FALSE}
+dat <- readRDS("cleandat.rds")
+dat_DPB1_0401 <- purrr::map_dfr(28:35,function(x){
+  count <- sum(str_count(dat$HLA_DPB1.alleles[dat[[x]]==1], pattern = "04:01:01G")>=1)
+  data <- data.frame(type=colnames(dat)[x],count=count)
+  count <- sum(str_count(dat$HLA_DPB1.alleles[dat[[x]]==1], pattern = "04:01:01G")>=2)
+  data <- rbind(data,data.frame(type=colnames(dat)[x],count=count))
+  data <- rbind(data,data.frame(type=colnames(dat)[x],count=sum(dat[[x]]==1)))
+  data$group <- factor(c("at least one allele","two alleles","total"),
+                       levels=c("two alleles","at least one allele","total"))
+  return(data)
+})
+
+#plot of at least one allele of HLA-DPB1*04:01
+ggplot(dat_DPB1_0401, aes(x=type,y=count,fill=group)) + 
+  geom_bar(stat="identity",position=position_dodge())+
+  ylab("Count")+xlab("Toxicity Type")+ggtitle("Count of at least one allele/two alleles of HLA-DPB1*04:01")+
+  theme_bw()+
+  theme(
+    #panel.grid.major = element_blank(), 
+    #panel.grid.minor = element_blank(),
+    # panel.background = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    #axis.text.x = element_text(angle = 45, hjust = 1),
+    # plot.title = element_text(hjust = 0.5)
+    )
+```
+<br/>
+<br/>
+<br/>
+
+## PTPN22 (rs2476601)
+
+***We have rs2476601 snp in MEGA chip.***
+
+```{r ptpn22,echo=FALSE,results="asis",warning=FALSE,message=FALSE}
+ptpn22 <- read.table("rs2476601.raw",header = T)
+colnames(ptpn22)[7] <- "rs2476601"
+colnames(ptpn22)[2] <- "Subject_ID"
+dat <- dat %>%
+  left_join(.,ptpn22[,c("Subject_ID","rs2476601")],by="Subject_ID")
+
+ptpn22.glm <- dat %>%
+    dplyr::select(Toxicity,Subject_ID,Gender,Age,Treatment_class,rs2476601)
+ptpn22.glm <- glm(Toxicity~Gender+Age+Treatment_class+rs2476601,family = binomial(link=logit),data=ptpn22.glm)
+ptpn22.glm <- data.frame(summary(ptpn22.glm)$coefficients)
+ptpn22.glm$odds.ratio <- exp(ptpn22.glm$Estimate)
+ptpn22.glm[,1:5] <- sapply(ptpn22.glm[,1:5],function(x) round(x,2))
+colnames(ptpn22.glm) <- c("Estimate","Standard Error","Statistics","p-value","odds ratio")
+ptpn22.glm$variable <- rownames(ptpn22.glm)
+ptpn22.glm <- ptpn22.glm[,c(6,1:5)]
+rownames(ptpn22.glm) <- NULL
+ptpn22.glm.n <- with(dat,table(unname(dat$Toxicity),unname(dat[["rs2476601"]])))
+rownames(ptpn22.glm.n) <- c("toxicity:0","toxicity:1")
+
+kable_styling(knitr::kable(ptpn22.glm,caption = "Association of PTPN22 snps with toxicity"))
+kable_styling(knitr::kable(ptpn22.glm.n,row.names = T))
+
+  
+ptpn22.glm.res <- dat %>%
+    dplyr::select(Responder,Subject_ID,Gender,Age,Treatment_class,rs2476601)
+ptpn22.glm.res <- glm(Responder~Gender+Age+Treatment_class+rs2476601,family = binomial(link=logit),data=ptpn22.glm.res)
+ptpn22.glm.res <- data.frame(summary(ptpn22.glm.res)$coefficients)
+ptpn22.glm.res$odds.ratio <- exp(ptpn22.glm.res$Estimate)
+ptpn22.glm.res[,1:5] <- sapply(ptpn22.glm.res[,1:5],function(x) round(x,2))
+colnames(ptpn22.glm.res) <- c("Estimate","Standard Error","Statistics","p-value","odds ratio")
+ptpn22.glm.res$variable <- rownames(ptpn22.glm.res)
+ptpn22.glm.res <- ptpn22.glm.res[,c(6,1:5)]
+rownames(ptpn22.glm.res) <- NULL
+ptpn22.glm.n.res <- with(dat,table(unname(dat$Responder),unname(dat[["rs2476601"]])))
+rownames(ptpn22.glm.n.res) <- c("response:0","response:1","NA")
+ptpn22.glm.n.res <- ptpn22.glm.n.res[1:2,]
+
+kable_styling(knitr::kable(ptpn22.glm.res,caption = "Association of PTPN22 snps with response"))
+kable_styling(knitr::kable(ptpn22.glm.n.res,row.names = T))
+
+```
+<br/>
+<br/>
+<br/>
+
+## Additive effect of the number(0/1) of homozygous (association with toxicitys and response)
+
+```{r addhomo,echo=FALSE,results="asis"}
+glm.add.homo <- purrr::map(c("HLA_A","HLA_B","HLA_C","HLA_DPB1","HLA_DQA1","HLA_DQB1","HLA_DRB1"),function(x){
+  glm.result <- dat %>%
+    dplyr::mutate(addhomo=as.numeric(ifelse(dat[[x]]=="homo",1,0))) %>%
+    dplyr::select(Toxicity,Subject_ID,Gender,Age,Treatment_class,addhomo) %>%
+    do(glm.result=glm(Toxicity~Gender+Age+Treatment_class+addhomo,family = binomial(link=logit),data=.))
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  glm.result$Variable[6] <- x
+  row.names(glm.result) <- NULL
+  # glm.result.n <- with(dat,table(unname(dat$Toxicity),unname(dat[[as.name(x)]])))
+  # rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+  return(glm.result)
+})
+
+var <- c("HLA_A","HLA_B","HLA_C","HLA_DPB1","HLA_DQA1","HLA_DQB1","HLA_DRB1")
+for (i in 1:7) {
+  print(landscape(kable_styling(knitr::kable(glm.add.homo[[i]],caption = paste(var[i])))))
+}
+
+```
+<br/>
+<br/>
+<br/>
+
+## Supertype
+
+### Network analysis
+
+```{r Bsupertype_network, echo=FALSE,warning=FALSE,message=FALSE,fig.width=30,fig.height=20}
+library(igraph)
+library(data.table)
+library(network)
+# library(ggnet)
+
+HLA_B_supertype <- read_excel("HLA_B_supertype.xlsx")
+dat <- dat[,c(1:62)]
+write.table(dat,file = "dat_all.txt",col.names = T,row.names = F,sep = "\t")
+dat$HLA_B_supertype1 <- HLA_B_supertype$supertype[match(str_remove(substr(dat$`HLA-B Allele 1`,1,5),":"), HLA_B_supertype$`HLA-B allele`)]
+dat$HLA_B_supertype2 <- HLA_B_supertype$supertype[match(str_remove(substr(dat$`HLA-B Allele 2`,1,5),":"), HLA_B_supertype$`HLA-B allele`)]
+dat$HLA_B_supertype <- paste(dat$HLA_B_supertype1,dat$HLA_B_supertype2,sep = ".")
+for (i in c("B07","B08","B27","B44","B58","B62")) {
+   dat[,paste("HLA_B_",i,sep = "")] <- ifelse(str_detect(dat$HLA_B_supertype,i),1,0)
+}
+#HLA_C_supertype <- read_excel("")
+dat_superbnet <- dat[,c("Subject_ID","Toxicity","Responder","Dermatologic","GI","Joint","Liver","Pneumonitis","Thyroid","HLA_B_supertype1","HLA_B_supertype2")]
+colnames(dat_superbnet)[10] <- "HLA_supgroup1"
+colnames(dat_superbnet)[11] <- "HLA_supgroup2"
+dat_superbnet$HLA_B_supertype1 <- HLA_B_supertype$`HLA-B allele`[match(str_remove(substr(dat$`HLA-B Allele 1`,1,5),":"), HLA_B_supertype$`HLA-B allele`)]
+dat_superbnet$HLA_B_supertype2 <- HLA_B_supertype$`HLA-B allele`[match(str_remove(substr(dat$`HLA-B Allele 2`,1,5),":"), HLA_B_supertype$`HLA-B allele`)]
+dat_superbnet$HLA_B_supertype <- paste(dat_superbnet$HLA_B_supertype1,dat_superbnet$HLA_B_supertype2,sep = ".")
+dat_superbnet <- dat_superbnet[!is.na(dat_superbnet$HLA_B_supertype1) & !is.na(dat_superbnet$HLA_B_supertype2),]
+
+for (i in unique(c(dat_superbnet$HLA_B_supertype1,dat_superbnet$HLA_B_supertype2))) {
+   dat_superbnet[,paste("HLA_B_",i,sep = "")] <- ifelse(str_detect(dat_superbnet$HLA_B_supertype,i),1,0)
+   dat_superbnet[which(dat_superbnet$HLA_B_supertype1==i & dat_superbnet$HLA_B_supertype2==i),paste("HLA_B_",i,sep = "")] <- 2
+}
+#dat_superbnet <- dat_superbnet[,-c(23)]
+dat_superbnet <- dat_superbnet[which(dat_superbnet$Toxicity=="1"),-c(2,3,14)]
+write.table(dat_superbnet,file = "tox_sup.txt",row.names = FALSE,col.names = TRUE,sep = "\t",quote = FALSE)
+```
+
+#### Toxicity Type <---> HLA-B genotypes
+
+```{r setup, include=FALSE,echo=FALSE,warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(r2d3)
+```
+
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+data <- read_tsv('tox_sup.txt')
+
+tidy_connections <- data %>% 
+  dplyr::select(-HLA_supgroup1, -HLA_supgroup2,-HLA_B_supertype1,-HLA_B_supertype2) %>% 
+  gather(
+    -Subject_ID,
+    key = 'variable',
+    value = 'present'
+  ) %>% 
+  filter(present != 0) %>% 
+  dplyr::select(-present) %>% 
+  mutate(
+    connection_type = ifelse(str_detect(variable, 'HLA'), 'gene', 'toxicity')
+  ) 
+
+nodes <- tidy_connections %>% 
+  distinct(variable, connection_type) %>% 
+  dplyr::rename(node = variable, type = connection_type) %>% 
+  bind_rows(
+    tibble(
+      node = unique(tidy_connections$Subject_ID),
+      type = 'subject'
+    )
+  ) %>% 
+  arrange(type)
+
+value <- purrr::map_int(1:sum(nodes$type=="gene"),function(x){
+  value <- sum(data[[which(str_detect(colnames(data),nodes$node[x]))]]!=0)
+})
+value[value==1] <- 2
+value <- value/3
+value <- c(value,rep(2,sum(nodes$type=="subject")))
+value <- c(value,purrr::map_int(253:258,function(x){
+  value <- sum(data[[which(str_detect(colnames(data),nodes$node[x]))]]!=0)
+})/3)
+nodes$value <- value
+# Get into integer encoded edge format required by tidygraph
+edges <- tidy_connections %>% 
+  mutate(
+    from = purrr::map_int(Subject_ID, ~which(. == nodes$node)),
+    to = purrr::map_int(variable, ~which(. == nodes$node))
+  ) %>% 
+  dplyr::select(from, to, connection_type)
+
+# Save data for JS visualization
+data_for_network <- list(
+  nodes = nodes %>% dplyr::rename(id = node),
+  edges = tidy_connections %>% dplyr::rename(source = Subject_ID, target = variable)
+)
+
+```
+
+
+```{d3 data=data_for_network,echo=FALSE,warning=FALSE,message=FALSE}
+const padding = 50;
+const X = d3.scaleLinear()
+  .range([padding, width - padding]);
+  
+const Y = d3.scaleLinear()
+  .range([padding, height - padding]);
+  
+const nodes = HTMLWidgets.dataframeToD3(data.nodes);
+const links = HTMLWidgets.dataframeToD3(data.edges);
+
+const node_types = unique(nodes.map(d => d.type));
+const num_types = node_types.length;
+
+type_to_prop = {
+  subject:  {r:2, opacity: 0.5, color: 'forestgreen'},
+  gene:     {r:8, opacity: 1,   color: 'orangered'},
+  toxicity: {r:8, opacity: 1,   color: 'steelblue'},
+};
+
+const simulation = d3.forceSimulation(nodes)
+  .force(
+    "link", 
+    d3.forceLink(links)
+      .id(d => d.id)
+      .iterations(5)
+  )
+  .force(
+    "collision", 
+    d3.forceCollide()
+      //.radius(d => type_to_prop[d.type].r)
+      .radius(function(d) { return d.value; })
+      .iterations(5)
+   )
+  .force(
+    "charge", 
+    d3.forceManyBody()
+     .strength(-150)
+  ) 
+  .alphaDecay(0.005)
+  //.alphaTarget(0.1)
+  .on("tick", ticked);
+
+const resting_message = "Hover over node to see name";
+const id_badge = svg.append('text')
+  .attr('x', padding/2)
+  .attr('y', padding/2)
+  .attr('font-size', '1.5rem')
+  .text(resting_message);
+
+const link = svg.append("g")
+   .attr("stroke", "#999")
+   .attr("stroke-opacity", 0.1)
+ .selectAll("line")
+ .data(links)
+ .enter().append("line")
+   .attr("stroke-width", 1.5);
+
+const node = svg.append("g")
+    .attr("stroke", "#fff")
+  .selectAll("circle")
+  .data(nodes)
+  .enter().append("circle")
+    //.attr("r", d => type_to_prop[d.type].r)
+    .attr("r", function(d) { return d.value; })
+    .attr("fill", d => type_to_prop[d.type].color)
+    .attr('fill-opacity', d => type_to_prop[d.type].opacity)
+    .on('mouseover', function(d){
+      id_badge.text(d.id);
+    //  d3.select(this).attr('r', type_to_prop[d.type].r * 1.5);
+    })
+    .on('mouseout', function(d){
+      id_badge.text(resting_message);
+      //d3.select(this).attr('r', type_to_prop[d.type].r);
+    })
+    .call(drag(simulation));
+
+  
+function ticked(){
+  
+  X.domain(d3.extent(nodes, d => d.x));
+  Y.domain(d3.extent(nodes, d => d.y));
+  
+   link
+      .attr("x1", d => X(d.source.x))
+      .attr("y1", d => Y(d.source.y))
+      .attr("x2", d => X(d.target.x))
+      .attr("y2", d => Y(d.target.y));
+
+  node
+      .attr("cx", d => X(d.x))
+      .attr("cy", d => Y(d.y));
+}
+
+function drag(simulation) {
+  
+  function dragstarted(d) {
+    if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+  
+  function dragged(d) {
+    d.fx = d3.event.x;
+    d.fy = d3.event.y;
+  }
+  
+  function dragended(d) {
+    if (!d3.event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+  
+  return d3.drag()
+    .on("start", dragstarted)
+    .on("drag", dragged)
+    .on("end", dragended);
+}
+
+// Helpers
+function unique(vec){
+  return [...new Set(vec)];
+}
+```
+
+#### Toxicity Type <---> HLA-B supertypes
+
+```{r visualize2,echo=FALSE,warning=FALSE,message=FALSE}
+dat_superbnet$HLA_B_supertype <- paste(dat_superbnet$HLA_supgroup1,dat_superbnet$HLA_supgroup1,sep = ".")
+dat_superbnet <- dat_superbnet[which(dat_superbnet$HLA_supgroup1!="Unclassified" & dat_superbnet$HLA_supgroup2!="Unclassified"),]
+for (i in unique(c(dat_superbnet$HLA_supgroup1,dat_superbnet$HLA_supgroup2))) {
+   dat_superbnet[,paste("HLA_B_",i,sep = "")] <- ifelse(str_detect(dat_superbnet$HLA_B_supertype,i),1,0)
+}
+write.table(dat_superbnet,file = "tox_sup.txt",row.names = FALSE,col.names = TRUE,sep = "\t",quote = FALSE)
+
+data <- read_tsv('tox_sup.txt')
+
+supergroup_cons <- data %>% 
+  dplyr::select(Subject_ID, HLA_supgroup1, HLA_supgroup2) %>% 
+  gather(
+    -Subject_ID,
+    key = "index",
+    value = "variable"
+  ) %>% 
+  filter(variable != "Unclassified") %>% 
+  distinct(Subject_ID, variable) %>% 
+  mutate(connection_type = "gene")
+
+tidy_connections <- data %>% 
+  dplyr::select(Subject_ID, Dermatologic, GI, Joint, Liver, Pneumonitis, Thyroid) %>% 
+  gather(
+    -Subject_ID,
+    key = 'variable',
+    value = 'present'
+  ) %>% 
+  filter(present != 0) %>% 
+  dplyr::select(-present) %>% 
+  mutate(connection_type = "toxicity") %>% 
+  bind_rows(supergroup_cons) 
+
+nodes <- tidy_connections %>% 
+  distinct(variable, connection_type) %>% 
+  dplyr::rename(node = variable, type = connection_type) %>% 
+  bind_rows(
+    tibble(
+      node = unique(tidy_connections$Subject_ID),
+      type = 'subject'
+    )
+  ) %>% 
+  arrange(type)
+
+value <- purrr::map_int(nodes$node[nodes$type=="gene"],function(x){
+  value <- sum(data$HLA_supgroup1==x | data$HLA_supgroup2==x)
+})
+value[value==1] <- 2
+value <- value/3
+value <- c(value,rep(2,sum(nodes$type=="subject")))
+value <- c(value,purrr::map_int(204:209,function(x){
+  value <- sum(data[[which(str_detect(colnames(data),nodes$node[x]))]]!=0)
+})/3)
+nodes$value <- value
+
+# Get into integer encoded edge format required by tidygraph
+edges <- tidy_connections %>% 
+  mutate(
+    from = purrr::map_int(Subject_ID, ~which(. == nodes$node)),
+    to = purrr::map_int(variable, ~which(. == nodes$node))
+  ) %>% 
+  dplyr::select(from, to, connection_type)
+
+# Save data for JS visualization
+data_for_network2 <- list(
+  nodes = nodes %>% dplyr::rename(id = node),
+  edges = tidy_connections %>% dplyr::rename(source = Subject_ID, target = variable)
+) 
+```
+
+
+```{d3 data=data_for_network2,echo=FALSE,warning=FALSE,message=FALSE}
+const padding = 50;
+const X = d3.scaleLinear()
+  .range([padding, width - padding]);
+  
+const Y = d3.scaleLinear()
+  .range([padding, height - padding]);
+  
+const nodes = HTMLWidgets.dataframeToD3(data.nodes);
+const links = HTMLWidgets.dataframeToD3(data.edges);
+
+const node_types = unique(nodes.map(d => d.type));
+const num_types = node_types.length;
+
+type_to_prop = {
+  subject:  {r:2, opacity: 0.5, color: 'forestgreen'},
+  gene:     {r:8, opacity: 1,   color: 'orangered'},
+  toxicity: {r:8, opacity: 1,   color: 'steelblue'},
+};
+
+const simulation = d3.forceSimulation(nodes)
+  .force(
+    "link", 
+    d3.forceLink(links)
+      .id(d => d.id)
+      .iterations(5)
+  )
+  .force(
+    "collision", 
+    d3.forceCollide()
+      //.radius(d => type_to_prop[d.type].r)
+      .radius(function(d) { return d.value; })
+      .iterations(5)
+   )
+  .force(
+    "charge", 
+    d3.forceManyBody()
+     .strength(-150)
+  ) 
+  .alphaDecay(0.005)
+  //.alphaTarget(0.1)
+  .on("tick", ticked);
+
+const resting_message = "Hover over node to see name";
+const id_badge = svg.append('text')
+  .attr('x', padding/2)
+  .attr('y', padding/2)
+  .attr('font-size', '1.5rem')
+  .text(resting_message);
+
+const link = svg.append("g")
+   .attr("stroke", "#999")
+   .attr("stroke-opacity", 0.1)
+ .selectAll("line")
+ .data(links)
+ .enter().append("line")
+   .attr("stroke-width", 1.5);
+
+const node = svg.append("g")
+    .attr("stroke", "#fff")
+  .selectAll("circle")
+  .data(nodes)
+  .enter().append("circle")
+    //.attr("r", d => type_to_prop[d.type].r)
+    .attr("r", function(d) { return d.value; })
+    .attr("fill", d => type_to_prop[d.type].color)
+    .attr('fill-opacity', d => type_to_prop[d.type].opacity)
+    .on('mouseover', function(d){
+      id_badge.text(d.id);
+      //d3.select(this).attr('r', type_to_prop[d.type].r * 1.5);
+    })
+    .on('mouseout', function(d){
+      id_badge.text(resting_message);
+      //d3.select(this).attr('r', type_to_prop[d.type].r);
+    })
+    .call(drag(simulation));
+
+  
+function ticked(){
+  
+  X.domain(d3.extent(nodes, d => d.x));
+  Y.domain(d3.extent(nodes, d => d.y));
+  
+   link
+      .attr("x1", d => X(d.source.x))
+      .attr("y1", d => Y(d.source.y))
+      .attr("x2", d => X(d.target.x))
+      .attr("y2", d => Y(d.target.y));
+
+  node
+      .attr("cx", d => X(d.x))
+      .attr("cy", d => Y(d.y));
+}
+
+function drag(simulation) {
+  
+  function dragstarted(d) {
+    if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+  
+  function dragged(d) {
+    d.fx = d3.event.x;
+    d.fy = d3.event.y;
+  }
+  
+  function dragended(d) {
+    if (!d3.event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+  
+  return d3.drag()
+    .on("start", dragstarted)
+    .on("drag", dragged)
+    .on("end", dragended);
+}
+
+// Helpers
+function unique(vec){
+  return [...new Set(vec)];
+}
+```
+
+
+
+### Statistical Analysis
+
+Toxicity:0 refers to toxicity patients not in a toxicity cluster
+
+Genotype:0 refers to toxicity patients not in a HLA genotypes cluster
+
+<br/>
+<br/>
+<br/>
+
+#### Toxicity ~ HLA-Genotype
+
+Dermatologic&Joint&Thyroid ~ HLA_B_0702&HLA_B_3701&HLA_B_4001&HLA_B_1402
+
+```{r Bsupertype_statistical, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_B_0702!=0 | HLA_B_3701!=0 | HLA_B_4001!=0 | HLA_B_1402!=0,1,0)),
+                toxicity = as.factor(ifelse(Dermatologic!=0 | Joint!=0 | Thyroid!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab1 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab1) <- c("Toxicity:0","Toxicity:1")
+colnames(tab1) <- c("Genotype:0","Genotype:1")
+knitr::kable(tab1,row.names = TRUE,caption = "2 by 2 table")
+#fisher.test(tab1)
+fishertab1 <- cbind(fisher.test(tab1)$p.value,fisher.test(tab1)$estimate)
+colnames(fishertab1) <- c("p-value","odds ratio")
+knitr::kable(fishertab1,row.names = FALSE,caption = "Fisher's exact result")
+
+gl <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl <- summary(gl)
+gl <- data.frame(gl$coefficients)
+gl$odds_ratio <- exp(gl$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl[,1:5] <- sapply(gl[,1:5],function(x) round(x,2))
+colnames(gl) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br/>
+<br/>
+<br/>
+
+Pneumonitis ~ HLA_B_0801&HLA_B_5701
+
+```{r Bsupertype_statistical2, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_B_5501!=0 | HLA_B_0801!=0 | HLA_B_5701!=0,1,0)),
+                toxicity = as.factor(ifelse(Pneumonitis!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab2 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab2) <- c("Toxicity:0","Toxicity:1")
+colnames(tab2) <- c("Genotype:0","Genotype:1")
+knitr::kable(tab2,row.names = TRUE,caption = "2 by 2 table")
+fishertab2 <- cbind(fisher.test(tab2)$p.value,fisher.test(tab2)$estimate)
+colnames(fishertab2) <- c("p-value","odds ratio")
+knitr::kable(fishertab2,row.names = FALSE,caption = "Fisher's exact result")
+
+gl2 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl2 <- summary(gl2)
+gl2 <- data.frame(gl2$coefficients)
+gl2$odds_ratio <- exp(gl2$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl2[,1:5] <- sapply(gl2[,1:5],function(x) round(x,2))
+colnames(gl2) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl2,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br/>
+<br/>
+<br/>
+
+GI ~ HLA_B_2705
+
+```{r Bsupertype_statistical3, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_B_2705!=0,1,0)),
+                toxicity = as.factor(ifelse(GI!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab3 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab3) <- c("Toxicity:0","Toxicity:1")
+colnames(tab3) <- c("Genotype:0","Genotype:1")
+knitr::kable(tab3,row.names = TRUE,caption = "2 by 2 table")
+fishertab3 <- cbind(fisher.test(tab3)$p.value,fisher.test(tab3)$estimate)
+colnames(fishertab3) <- c("p-value","odds ratio")
+knitr::kable(fishertab3,row.names = FALSE,caption = "Fisher's exact result")
+
+gl3 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl3 <- summary(gl3)
+gl3 <- data.frame(gl3$coefficients)
+gl3$odds_ratio <- exp(gl3$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl3[,1:5] <- sapply(gl3[,1:5],function(x) round(x,2))
+colnames(gl3) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl3,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br/>
+<br/>
+<br/>
+
+Liver ~ HLA_B_4402&HLA_B_5201
+
+```{r Bsupertype_statistical3.2, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_B_4402!=0 | HLA_B_5201!=0,1,0)),
+                toxicity = as.factor(ifelse(Liver!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab4 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab4) <- c("Toxicity:0","Toxicity:1")
+colnames(tab4) <- c("Genotype:0","Genotype:1")
+knitr::kable(tab4,row.names = TRUE,caption = "2 by 2 table")
+fishertab4 <- cbind(fisher.test(tab4)$p.value,fisher.test(tab4)$estimate)
+colnames(fishertab4) <- c("p-value","odds ratio")
+knitr::kable(fishertab4,row.names = FALSE,caption = "Fisher's exact result")
+
+gl4 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl4 <- summary(gl4)
+gl4 <- data.frame(gl4$coefficients)
+gl4$odds_ratio <- exp(gl4$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl4[,1:5] <- sapply(gl4[,1:5],function(x) round(x,2))
+colnames(gl4) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl4,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br>
+<br>
+<br>
+
+
+#### Toxicity ~ HLA-Supertype
+
+GI ~ B62
+```{r Bsupertype_statistical4, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_supgroup1=="B62" | HLA_supgroup2=="B62",1,0)),
+                toxicity = as.factor(ifelse(GI!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab4 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab4) <- c("Toxicity:0","Toxicity:1")
+colnames(tab4) <- c("Supertype:0","Supertype:1")
+knitr::kable(tab4,row.names = TRUE,caption = "2 by 2 table")
+fishertab4 <- cbind(fisher.test(tab4)$p.value,fisher.test(tab4)$estimate)
+colnames(fishertab4) <- c("p-value","odds ratio")
+knitr::kable(fishertab4,row.names = FALSE,caption = "Fisher's exact result")
+
+gl4 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl4 <- summary(gl4)
+gl4 <- data.frame(gl4$coefficients)
+gl4$odds_ratio <- exp(gl4$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl4[,1:5] <- sapply(gl4[,1:5],function(x) round(x,2))
+colnames(gl4) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl4,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br/>
+<br/>
+<br/>
+
+Dermatologic ~ B07+B44
+```{r Bsupertype_statistical5, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_supgroup1=="B07" | HLA_supgroup2=="B07" | HLA_supgroup1=="B44" | HLA_supgroup2=="B44",1,0)),
+                toxicity = as.factor(ifelse(Dermatologic!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab5 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab5) <- c("Toxicity:0","Toxicity:1")
+colnames(tab5) <- c("Supertype:0","Supertype:1")
+knitr::kable(tab5,row.names = TRUE,caption = "2 by 2 table")
+fishertab5 <- cbind(fisher.test(tab5)$p.value,fisher.test(tab5)$estimate)
+colnames(fishertab5) <- c("p-value","odds ratio")
+knitr::kable(fishertab5,row.names = FALSE,caption = "Fisher's exact result")
+
+gl5 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl5 <- summary(gl5)
+gl5 <- data.frame(gl5$coefficients)
+gl5$odds_ratio <- exp(gl5$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl5[,1:5] <- sapply(gl5[,1:5],function(x) round(x,2))
+colnames(gl5) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl5,row.names = TRUE,caption = "Logistic Regression result")
+```
+
+<br/>
+<br/>
+<br/>
+
+Pneumonitis&Thyroid ~ B58
+```{r Bsupertype_statistical6, echo=FALSE,warning=FALSE,message=FALSE}
+assoc1 <- dat_superbnet %>%
+  dplyr::mutate(genotype = as.factor(ifelse(HLA_supgroup1=="B58" | HLA_supgroup2=="B58",1,0)),
+                toxicity = as.factor(ifelse(Pneumonitis | Thyroid!=0,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,genotype) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+tab6 <- table(assoc1$toxicity,assoc1$genotype)
+rownames(tab6) <- c("Toxicity:0","Toxicity:1")
+colnames(tab6) <- c("Supertype:0","Supertype:1")
+knitr::kable(tab6,row.names = TRUE,caption = "2 by 2 table")
+fishertab6 <- cbind(fisher.test(tab6)$p.value,fisher.test(tab6)$estimate)
+colnames(fishertab6) <- c("p-value","odds ratio")
+knitr::kable(fishertab6,row.names = FALSE,caption = "Fisher's exact result")
+
+gl6 <- glm(toxicity ~ genotype + Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+gl6 <- summary(gl6)
+gl6 <- data.frame(gl6$coefficients)
+gl6$odds_ratio <- exp(gl6$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+gl6[,1:5] <- sapply(gl6[,1:5],function(x) round(x,2))
+colnames(gl6) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+knitr::kable(gl6,row.names = TRUE,caption = "Logistic Regression result")
+
+# saveRDS(dat,file = "cleandat.rds")
+```
+<br/>
+<br/>
+<br/>
+
+
+# Association Analysis 
+
+## 1. HLA zygosity
+
+### 1.1 Association between toxicity and HLA zygosity. 
+We are interested in the relationship between toxicity and HLA zygosity. We firstly ignore the severity of toxicity and set up a logistic regression model adjusting gender, age, treatment, interaction between treatment and HLA zygosity.
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.zygosity(het/homo)+Gender+Age+Treatment+Treatment*HLA.zygosity\epsilon$$
+
+***Null Hypothesis***: HLA zygosity is not associated with toxicity.
+
+***Results***: We can see ***treatment class*** is highly associated with toxicity in all HLA groups. We did not find any significant HLA group associated with toxicity at pvalue < 0.05.
+
+```{r association1,echo=FALSE,results="asis"}
+#ignore the type of toxicities at first
+dat <- readRDS("cleandatbefore.rds")
+for (i in seq(14,26,2)) {
+  colnames <- substr(colnames(dat)[i],1,nchar(colnames(dat)[i])-9)
+  colnames <- gsub("-","_",colnames)
+  dat[,colnames] <- factor(ifelse(dat[,i]==dat[,i+1],"homo","het"),levels = c("het","homo"))
+}
+for (i in seq(14,26,2)) {
+  colnames <- substr(colnames(dat)[i],1,nchar(colnames(dat)[i])-9)
+  colnames <- gsub("-","_",colnames)
+  dat[,paste(colnames,".alleles",sep = "")] <- as.factor(paste(c(dat[,i])[[1]],".",c(dat[i+1])[[1]],sep = ""))
+}
+
+glm_toxicity_func <- function(var,data){
+  
+  fla <- paste("Toxicity ~",paste(var,"Gender","Age","Treatment_class",
+                                paste(var,"*Treatment_class",sep=""),sep = "+"))
+  
+  glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Toxicity),unname(data[[var]])))
+  rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+  
+  glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  
+  return(glm.result.total)
+}
+
+glm.zygosity <- lapply(colnames(dat)[36:42],function(x) glm_toxicity_func(x, dat))
+
+table.name <- c("HLA-A","HLA-B","HLA-C","HLA-DPB1","HLA-DQA1","HLA-DQB1","HLA-DRB1")
+
+# for(i in 1:7){
+#   print(landscape(kable_styling(
+#     knitr::kable(list(
+#       glm.zygosity[[i]],
+#       glm.zygosity.n[[i]]),
+#       row.names = FALSE,caption = paste("Table1.1.",i,table.name[i]),
+#       booktabs=TRUE,valign="t"))))
+# }
+
+for(i in 1:7){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.zygosity[[i]][[j]],caption = paste("Table1.1.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.zygosity[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+#write.table(glm.result,file = "glm_zygo_result.csv",row.names = FALSE,col.names = TRUE,sep = ",",quote = FALSE)
+```
+
+<br/>
+<br/>
+<br/>
+
+### 1.2 Association between toxicity severity level and HLA zygosity. (Proportional Odds Model)
+We are interested in the relationship between toxicity severity and HLA zygosity. We take into consideration of the toxicity severity, which are 
+```{r equation,echo=FALSE,eval=FALSE,results="asis"}
+eq <-  noquote(paste(expression("0 & \text{No Toxicity}\\1 & \text{Toxicity not severe}\\2 & \text{Toxicity severe}")))
+```
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{No Toxicity}\\
+    1, & \text{Toxicity not severe}\\
+    2, & \text{Toxicity severe}
+  \end{cases}
+\end{aligned}
+$$
+and set up a proportional odds model adjusting gender, age and treatment, where j represent the toxicity severity levels
+
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.zygosity(het/homo)+Gender+Age+Treatment+Treatment*HLA.zygosity(het/homo)+\epsilon$$
+
+***Null Hypothesis***: HLA zygosity is not associated with toxicity severity level that HLA homozygosity will not increase the risk of toxicity.
+
+***Results***:
+We still did not see significant results.
+
+```{r association1_prop, echo=FALSE,results="asis"}
+
+dat$Toxicity_level <- as.character(dat$Toxicity)
+dat$Toxicity_level[which(dat$Severe_tox=="1")] <- "2"
+dat$Toxicity_level <- as.factor(dat$Toxicity_level)
+
+
+prop_toxicity_func <- function(var,data){
+
+  fla <- paste("Toxicity_level ~",paste(var,"Gender","Age","Treatment_class",
+                                paste(var,"*Treatment_class",sep=""),sep = "+"))
+  
+  prop.result <- data %>%
+    dplyr::select(Toxicity_level,one_of(var),Gender,Age,Treatment_class) %>%
+    do(prop.result=polr(as.formula(fla),Hess = TRUE,data=.))
+  
+  prop.result <- broom::tidy(prop.result[[1]][[1]])
+  
+  prop.result <- prop.result[,-5]
+  
+  prop.result$pvalue <- pnorm(abs(prop.result$statistic),lower.tail = FALSE)*2
+  
+  prop.result$odds.ratio <- exp(prop.result$estimate)
+  
+  prop.result[,2:6] <- sapply(prop.result[,2:6],function(x) round(x,2))
+  
+  colnames(prop.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  prop.result.n <- with(data,table(unname(data$Toxicity_level),unname(data[[var]])))
+  rownames(prop.result.n) <- c("toxicity:0","toxicity:1","toxicity:2")
+  
+  prop.result.total <- list("prop.result"=prop.result,"prop.result.n"=prop.result.n)
+  
+  return(prop.result.total)
+  
+}
+
+prop.zygosity <- lapply(colnames(dat)[36:42],function(x) prop_toxicity_func(x, dat))
+
+table.name <- c("HLA-A","HLA-B","HLA-C","HLA-DPB1","HLA-DQA1","HLA-DQB1","HLA-DRB1")
+
+for(i in 1:7){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.zygosity[[i]][[j]],caption = paste("Table1.2.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.zygosity[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+### 1.3 Association between response and HLA zygosity.
+We are interested in the relationship between response and HLA zygosity. 
+```{r association1_response,echo=FALSE,results="asis"}
+glm_response_func <- function(var,data){
+  
+  fla <- paste("Responder ~",paste(var,"Gender","Age","Treatment_class",
+                                paste(var,"*Treatment_class",sep=""),sep = "+"))
+  
+  glm.result <- data %>%
+    dplyr::select(Responder,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Responder),unname(data[[var]])))
+  rownames(glm.result.n) <- c("Response:0","Response:1","Response:NA")
+  
+  glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  
+  return(glm.result.total)
+}
+
+glm.zygosity.response <- lapply(colnames(dat)[36:42],function(x) glm_response_func(x, dat))
+
+table.name <- c("HLA-A","HLA-B","HLA-C","HLA-DPB1","HLA-DQA1","HLA-DQB1","HLA-DRB1")
+
+for(i in 1:7){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.zygosity.response[[i]][[j]],caption = paste("Table1.3.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.zygosity.response[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+## 2. HLA genotypes
+
+### 2.1 Association between toxicity and genotypes
+We are interested in the relationship between toxicity and HLA genotypes. We firstly ignored the severity of toxicity and applied logistic regression model adjusting for gender, age, treatment, interaction between treatment and HLA alleles. We only consider those specific pairs of allels appear in more than 10 patients for each HLA-group.
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.genotypes+Gender+Age+Treatment+Treatment*HLA.genotypes+\epsilon$$
+
+***Null Hypothesis***: HLA alleles is not associated with toxicity that there is no specific HLA alleles pair will increase the risk of toxicity.
+
+***Results***: We did not find any significant results if adjusting interaction term. But if we do not consider interaction,
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.alleles+Gender+Age+Treatment+\epsilon$$
+We can see that HLA-C 05:01:01/07:01:01, HLA-DPB1 03:01:01/04:02:01, HLA-DQA1 01:03:01/05:01:01, HLA-DQB1 02:01:01/03:01:01 show significant results. As the coefficient is about -1.69,-1.52,-1.64,-1.00 we expect to see a decrease in the odds ratio of taking the risk of toxicity if having these specific alleles, given the age and gender are constant in the model.
+
+```{r association2,echo=FALSE,results="asis"}
+glm_toxicity_alleles_func <- function(var,data,interaction){
+ 
+  variables <- c(data[,var])[[1]]
+  data <- data[which(variables %in% names(table(data[,var])[as.vector(table(data[,var]))>=10])),
+                             c("Toxicity",var,"Gender","Age","Treatment_class")]
+  
+  data[,2] <- as.character(unlist(c(data[,2])[1]))
+  data[,2] <- as.factor(unlist(c(data[,2])[1]))
+  
+  glm.result.total.list <- list()
+  for (j in 1:length(names(table(data[,2])))) {
+    data_specific <- dat[,c("Toxicity",var,"Gender","Age","Treatment_class")]
+    data_specific[,2] <- as.factor(ifelse(data_specific[,2] == names(table(data[,2]))[j], 1, 0))
+    colnames(data_specific)[2] <- paste(colnames(data_specific)[2],names(table(data[,2]))[j],sep = "")
+  
+    if(interaction==TRUE){
+    fla <- paste("Toxicity ~",paste(paste0("`",colnames(data_specific)[2],"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",colnames(data_specific)[2],"`"),"*Treatment_class",sep=""),sep = "+"))
+    
+    glm.result <- data_specific %>%
+      do(glm.result=glm(as.formula(fla),family = binomial(link=logit),
+                  data = .))
+    } else {
+      glm.result <- data_specific %>%
+      do(glm.result=glm(Toxicity~.,family = binomial(link=logit),
+                  data = .))
+    }
+    
+    glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+    glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+    glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+    colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+    row.names(glm.result) <- NULL
+
+    glm.result.n <- with(data_specific,table(unname(data_specific$Toxicity),unname(data_specific[[colnames(data_specific)[2]]])))
+    rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+    
+    glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+    
+    library(rlist)
+    if(glm.result$`p-value`[2]<0.05){
+      glm.result.total.list <- list.append(glm.result.total.list,glm.result.total)
+    }
+  }
+  
+  return(glm.result.total.list)
+}
+
+glm.alleles.int <- lapply(colnames(dat)[c(43,45:49)],function(x) glm_toxicity_alleles_func(x, dat,TRUE))
+glm.alleles <- lapply(colnames(dat)[c(43,45:49)],function(x) glm_toxicity_alleles_func(x, dat,FALSE))
+glm.alleles <- list.clean(glm.alleles,function(x) length(x)==0)
+
+table.name <- c("HLA-C","HLA-DPB1","HLA-DQA1","HLA-DQB1")
+
+for(i in 1:4){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.alleles[[i]][[1]][[j]],caption = paste("Table2.1.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.alleles[[i]][[1]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+### 2.2 Association between toxicity severity and toxicity alleles.
+We are interested in the relationship between toxicity severity and HLA alleles. We take into consideration the severity of toxicity, which are 
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{No Toxicity}\\
+    1, & \text{Toxicity not severe}\\
+    2, & \text{Toxicity severe}
+  \end{cases}
+\end{aligned}
+$$
+and applied proportional odds model adjusting for gender, age and treatment. We only consider those specific pairs of allels appear in more than 10 patients for each HLA-group, where j represents the toxicity severity levels.
+
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.alleles+Gender+Age+Treatment+\epsilon$$
+
+***Null Hypothesis***: HLA alleles is not associated with toxicity that there is no specific HLA allele pair will increase the risk of toxicity.
+
+***Results***: If we do not consider interaction term, We still see ***HLA_C.alleles04:01:01G.07:01:01G***, ***HLA_DPB1.alleles03:01:01G.04:02:01G***, ***HLA_DQB1.alleles02:01:01i.03:01:01i*** shows a significant trend. 
+
+```{r association2_prop, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+prop_toxicity_alleles_func <- function(var,data,interaction){
+ 
+  variables <- c(data[,var])[[1]]
+  data <- data[which(variables %in% names(table(data[,var])[as.vector(table(data[,var]))>=10])),
+                             c("Toxicity_level",var,"Gender","Age","Treatment_class")]
+  
+  data[,2] <- as.character(unlist(c(data[,2])[1]))
+  data[,2] <- as.factor(unlist(c(data[,2])[1]))
+  
+  prop.result.total.list <- list()
+  for (j in 1:length(names(table(data[,2])))) {
+    data_specific <- dat[,c("Toxicity_level",var,"Gender","Age","Treatment_class")]
+    data_specific[,2] <- as.factor(ifelse(data_specific[,2] == names(table(data[,2]))[j], 1, 0))
+    colnames(data_specific)[2] <- paste(colnames(data_specific)[2],names(table(data[,2]))[j],sep = "")
+  
+    if(interaction==TRUE){
+    fla <- paste("Toxicity_level ~",paste(paste0("`",colnames(data_specific)[2],"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",colnames(data_specific)[2],"`"),"*Treatment_class",sep=""),sep = "+"))
+    prop.result <- data_specific %>%
+    do(prop.result=polr(as.formula(fla),Hess = TRUE,
+                  data = data_specific))
+    } else {
+      prop.result <- data_specific %>%
+        do(prop.result=polr(Toxicity_level~.,Hess = TRUE,
+                  data = data_specific))
+    }
+   
+   prop.result <- broom::tidy(prop.result[[1]][[1]])
+  
+   prop.result <- prop.result[,-5]
+  
+   prop.result$pvalue <- pnorm(abs(prop.result$statistic),lower.tail = FALSE)*2
+  
+   prop.result$odds.ratio <- exp(prop.result$estimate)
+  
+   prop.result[,2:6] <- sapply(prop.result[,2:6],function(x) round(x,2))
+  
+   colnames(prop.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+   prop.result.n <- with(data_specific,table(unname(data_specific$Toxicity_level),unname(data_specific[[colnames(data_specific)[2]]])))
+   rownames(prop.result.n) <- c("toxicity:0","toxicity:1","toxicity:2")
+  
+   prop.result.total <- list("prop.result"=prop.result,"prop.result.n"=prop.result.n)
+   
+   prop.result.total <- list("prop.result"=prop.result,"prop.result.n"=prop.result.n)
+    
+    library(rlist)
+    if(prop.result$`p-value`[1]<0.05){
+      prop.result.total.list <- list.append(prop.result.total.list,prop.result.total)
+    } 
+  }
+  return(prop.result.total.list)
+}
+  
+prop.alleles.int <- lapply(colnames(dat)[c(43,45:49)],function(x) prop_toxicity_alleles_func(x, dat,TRUE))
+prop.alleles <- lapply(colnames(dat)[c(43,45:49)],function(x) prop_toxicity_alleles_func(x, dat,FALSE))
+prop.alleles <- list.clean(prop.alleles,function(x) length(x)==0)
+
+table.name <- c("HLA-C","HLA-DPB1","HLA-DQB1")
+
+for(i in 1:3){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.alleles[[i]][[1]][[j]],caption = paste("Table2.2.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.alleles[[i]][[1]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+### 2.3 Association between response and HLA alleles.
+We are interested in the relationship between response and HLA alleles. 
+```{r association2_response,echo=FALSE,results="asis"}
+glm_response_alleles_func <- function(var,data,interaction){
+ 
+  variables <- c(data[,var])[[1]]
+  data <- data[which(variables %in% names(table(data[,var])[as.vector(table(data[,var]))>=10])),
+                             c("Responder",var,"Gender","Age","Treatment_class")]
+  
+  data[,2] <- as.character(unlist(c(data[,2])[1]))
+  data[,2] <- as.factor(unlist(c(data[,2])[1]))
+  
+  glm.result.total.list <- list()
+  for (j in 1:length(names(table(data[,2])))) {
+    data_specific <- dat[,c("Responder",var,"Gender","Age","Treatment_class")]
+    data_specific[,2] <- as.factor(ifelse(data_specific[,2] == names(table(data[,2]))[j], 1, 0))
+    colnames(data_specific)[2] <- paste(colnames(data_specific)[2],names(table(data[,2]))[j],sep = "")
+  
+    if(interaction==TRUE){
+    fla <- paste("Responder ~",paste(paste0("`",colnames(data_specific)[2],"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",colnames(data_specific)[2],"`"),"*Treatment_class",sep=""),sep = "+"))
+    glm.result <- data_specific %>%
+      do(glm.result=glm(as.formula(fla),family = binomial(link=logit),
+                  data = .))
+    
+    } else {
+      glm.result <- data_specific %>%
+      do(glm.result=glm(Responder~.,family = binomial(link=logit),
+                  data = .))
+    }
+    
+    glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+    glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+    glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+    colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+    row.names(glm.result) <- NULL
+
+    glm.result.n <- with(data_specific,table(unname(data_specific$Responder),unname(data_specific[[colnames(data_specific)[2]]])))
+    rownames(glm.result.n) <- c("Response:0","Response:1","Response:NA")
+    
+    glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+    
+    library(rlist)
+    if(glm.result$`p-value`[2]<0.05){
+      glm.result.total.list <- list.append(glm.result.total.list,glm.result.total)
+    } 
+  }
+  
+  return(glm.result.total.list)
+}
+
+glm.alleles.response.int <- lapply(colnames(dat)[c(43,45:49)],function(x) glm_response_alleles_func(x, dat,TRUE))
+glm.alleles.response <- lapply(colnames(dat)[c(43,45:49)],function(x) glm_response_alleles_func(x, dat,FALSE))
+glm.alleles.response <- list.clean(glm.alleles.response,function(x) length(x)==0)
+
+table.name <- c("HLA-C","HLA-DQB1")
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.alleles.response[[i]][[1]][[j]],caption = paste("Table2.3.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.alleles.response[[i]][[1]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+## 3. HLA genotype (additive effect)
+
+### 3.1  Association between toxicity and HLA genotype (additive effect)
+
+We are interested in the relationship between toxicity and HLA alleles. We firstly did not take into consideration the severity of toxicity and we treated each allele pair as, for example if we are interested in allele is A 
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{no A allele}\\
+    1, & \text{one A allele}\\
+    2, & \text{two A alleles}
+  \end{cases}
+\end{aligned}
+$$
+And then applied linear regression model adjusting for gender, age and treatment.
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.additive.alleles+Gender+Age+Treatment+Treatment*HLA.additive.alleles+\epsilon$$
+
+***Null Hypothesis***: HLA genotype is not associated with toxicity that the additive effect of an allele will not increase the risk of toxicity.
+
+***Results***: We do not find any significant results if considering interaction term. If we do not consider interaction term, we identified three significant results: HLA-B.14:02:01G, HLA-C.08:02:01G, HLA-DRB1.01:03:01.
+```{r association3, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+alleles <- list()
+for (i in seq(14,26,2)) {
+  alleles[[i]] <- unique(c(c(dat[,i])[[1]],c(dat[,i+1])[[1]]))
+  alleles[[i]] <- alleles[[i]][which(!is.na(alleles[[i]]))]
+}
+
+dat_alleles <- data.frame(row.names = 1:453)
+m <- 43
+for (i in seq(14,26,2)) {
+  variable <- substr(colnames(dat[,i]),1,nchar(colnames(dat[,i]))-9)
+  for (j in 1:length(alleles[[i]])) {
+    dat_alleles[,paste(variable,alleles[[i]][j],sep = ".")] <- str_count(dat[,m][[1]],alleles[[i]][j])
+  }
+  m <- m+1
+}
+dat_alleles <- cbind(dat[,c(1:8,10)],dat_alleles,dat[,50])
+dat_alleles[,c(10:193)] <- sapply(dat_alleles[,c(10:193)],function(x) as.numeric(x))
+
+
+glm_toxicity_additive_func <- function(var,data,interaction){
+  
+  data <- data[,c("Toxicity",var,"Gender","Age","Treatment_class")]
+  
+  if(interaction==TRUE){
+    fla <- paste("Toxicity ~",paste(paste("`",var,"`",sep=""),"Gender","Age","Treatment_class",paste(paste("`",var,"`",sep=""),"*Treatment_class",sep=""),sep = "+"))
+    glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  } else {
+    glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(Toxicity~.,family = binomial(link=logit),data=.))
+  }
+  
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Toxicity),unname(data[[var]])))
+  rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+  
+  if(glm.result$`p-value`[2]<0.06){
+    glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  } else {
+    glm.result.total <- NULL
+  }
+  
+  return(glm.result.total)
+}
+
+glm.additive <- lapply(colnames(dat_alleles)[10:(ncol(dat_alleles)-1)],function(x) glm_toxicity_additive_func(x, dat_alleles,FALSE))
+glm.additive <- list.clean(glm.additive,function(x) length(x)==0)
+table.name <- c("HLA-B","HLA-C","HLA-DRB1")
+
+for(i in 1:3){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.additive[[i]][[j]],caption = paste("Table3.1.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.additive[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+### 3.2  Association between toxicity severity and HLA additive alleles
+
+We are interested in the relationship between toxicity severity and HLA alleles. We take into consideration the severity of toxicity, which are 
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{No Toxicity}\\
+    1, & \text{Toxicity not severe}\\
+    2, & \text{Toxicity severe}
+  \end{cases}
+\end{aligned}
+$$
+and we treated each allele pair as, for example if we are interested in allele is A 
+
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{no A allele}\\
+    1, & \text{one A allele}\\
+    2, & \text{two A alleles}
+  \end{cases}
+\end{aligned}
+$$
+
+And then applied proportional odds model adjusting for gender, age and treatment, where j represents toxicity severity levels
+
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.additive.alleles+Gender+Age+Treatment+Treatment*HLA.additive.alleles+\epsilon$$
+
+***Null Hypothesis***: HLA alleles is not associated with toxicity that the additive effect of an allele will not increase the risk of toxicity.
+
+Results: If we do not consider interaction term, we identified 62 significant results. If we consider interaction term, we identified 78 significant results. Here is the list.
+```{r association3_prop, echo=FALSE,warning=FALSE,message=FALSE}
+prop_toxicity_additive_func <- function(var,data,interaction){
+  
+  if(interaction==TRUE){
+    fla <- paste("Toxicity_level ~",paste(paste("`",var,"`",sep=""),"Gender","Age","Treatment_class",paste(paste("`",var,"`",sep=""),"*Treatment_class",sep=""),sep = "+"))
+  
+  prop.result <- data %>%
+    dplyr::select(Toxicity_level,one_of(var),Gender,Age,Treatment_class) %>%
+    do(prop.result=polr(as.formula(fla),Hess = TRUE,data=.))
+  } else {
+    prop.result <- data %>%
+    dplyr::select(Toxicity_level,one_of(var),Gender,Age,Treatment_class) %>%
+    do(prop.result=polr(Toxicity_level~.,Hess = TRUE,data=.))
+  }
+  
+  prop.result <- broom::tidy(prop.result[[1]][[1]])
+  
+  prop.result <- prop.result[,-5]
+  
+  prop.result$pvalue <- pnorm(abs(prop.result$statistic),lower.tail = FALSE)*2
+  
+  prop.result$odds.ratio <- exp(prop.result$estimate)
+  
+  prop.result[,2:6] <- sapply(prop.result[,2:6],function(x) round(x,2))
+  
+  colnames(prop.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  prop.result.n <- with(data,table(unname(data$Toxicity_level),unname(data[[var]])))
+  rownames(prop.result.n) <- c("toxicity:0","toxicity:1","toxicity:2")
+  
+  if(prop.result$`p-value`[1]<0.05){
+    prop.result.total <- list("prop.result"=prop.result,"prop.result.n"=prop.result.n)
+  } else {
+    prop.result.total <- NULL
+  }
+  return(prop.result.total)
+  
+}
+prop.additive.int <- lapply(colnames(dat_alleles)[10:(ncol(dat_alleles)-1)],function(x) prop_toxicity_additive_func(x, dat_alleles,TRUE))
+prop.additive.int <- list.clean(prop.additive.int,function(x) length(x)==0)
+prop.additive <- lapply(colnames(dat_alleles)[10:(ncol(dat_alleles)-1)],function(x) prop_toxicity_additive_func(x, dat_alleles,FALSE))
+prop.additive <- list.clean(prop.additive,function(x) length(x)==0)
+
+
+name <- prop.additive.int[[1]][[1]]$Variable[1]
+for(i in 1:length(prop.additive.int)){
+  name <- c(name,prop.additive.int[[i]][[1]]$Variable[1])
+  names(prop.additive.int)[i] <- prop.additive.int[[i]][[1]]$Variable[1]
+}
+
+
+selectInput(
+  "tables", label = "HLA alleles:",
+  choices = name
+)
+
+renderTable(prop.additive.int[[as.character(input$tables)]]$prop.result)
+
+```
+
+<br/>
+<br/>
+<br/>
+
+## 4. Association between toxicity and HLA KIR ligands
+
+### 4.1  Association between toxicity and HLA KIR ligands
+
+We are interested in the relationship between toxicity and HLA KIR ligands.
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.ligands+Gender+Age+Treatment+HLA.ligands*Treatment+\epsilon$$
+
+***Null Hypothesis***: HLA KIR ligands is not associated with toxicity.
+
+***Results***: We can see ***treatment class*** is highly associated with toxicity in all HLA groups. We did not find any significant HLA ligands associated with toxicity at p-value < 0.05.
+
+```{r association4_glm, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+dat <- dat[,1:50]
+dat$`HLA-B.ligands1` <- str_remove(substr(dat$`HLA-B Allele 1`,1,5),":")
+dat$`HLA-B.ligands2` <- str_remove(substr(dat$`HLA-B Allele 2`,1,5),":")
+dat$`HLA-C.ligands1` <- str_remove(substr(dat$`HLA-C Allele 1`,1,5),":")
+dat$`HLA-C.ligands2` <- str_remove(substr(dat$`HLA-C Allele 2`,1,5),":")
+
+ligands_dat <- read_excel("KIRligands.xlsx")
+ligands_dat$hla <- substr(ligands_dat$allele,1,1)
+ligands_dat$allele[which(ligands_dat$hla=="B")] <- substr(ligands_dat$allele[which(ligands_dat$hla=="B")],3,6)
+ligands_dat$allele[which(ligands_dat$hla=="C")] <- substr(ligands_dat$allele[which(ligands_dat$hla=="C")],4,7)
+
+dat[,"HLA-B.ligands1"] <- ligands_dat[match(dat$`HLA-B.ligands1`,ligands_dat[which(ligands_dat$hla=="B"),]$allele),"epitope"] 
+dat[,"HLA-B.ligands2"] <- ligands_dat[match(dat$`HLA-B.ligands2`,ligands_dat[which(ligands_dat$hla=="B"),]$allele),"epitope"] 
+
+dat[,"HLA-C.ligands1"] <- ligands_dat[match(dat$`HLA-C.ligands1`,ligands_dat[which(ligands_dat$hla=="C"),]$allele)+sum(ligands_dat$hla=="B"),"epitope"]
+dat[,"HLA-C.ligands2"] <- ligands_dat[match(dat$`HLA-C.ligands2`,ligands_dat[which(ligands_dat$hla=="C"),]$allele)+sum(ligands_dat$hla=="B"),"epitope"]
+
+dat$`HLA-B.ligands` <- with(dat,paste0(`HLA-B.ligands1`,`HLA-B.ligands2`))
+dat$`HLA-B.ligands`[which(str_detect(dat$`HLA-B.ligands`,"NA"))] <- NA
+#Bw4 vs. no Bw4
+dat$`HLA-B.ligands`[which(str_detect(dat$`HLA-B.ligands`,"Bw6"))] <- "Bw6Bw6/Bw4Bw6"
+dat$`HLA-B.ligands`[which(!str_detect(dat$`HLA-B.ligands`,"Bw6"))] <- "Bw4Bw4"
+dat$`HLA-B.ligands` <- as.factor(dat$`HLA-B.ligands`)
+#dat$`HLA-B.ligands`[which(dat$`HLA-B.ligands`=="Bw6Bw4")] <- "Bw4Bw6"
+
+dat$`HLA-C.ligands` <- with(dat,paste0(`HLA-C.ligands1`,`HLA-C.ligands2`))
+dat$`HLA-C.ligands`[which(str_detect(dat$`HLA-C.ligands`,"NA"))] <- NA
+dat$`HLA-C.ligands`[157] <- "C1C1"
+dat$`HLA-C.ligands`[166] <- "C2C2"
+dat$`HLA-C.ligands`[251] <- "C2C1"
+#Bw4 vs. no Bw4
+dat$`HLA-C.ligands`[which(str_detect(dat$`HLA-C.ligands`,"C1"))] <- "C1C1/C1C2"
+dat$`HLA-C.ligands`[which(!str_detect(dat$`HLA-C.ligands`,"C1"))] <- "C2C2"
+dat$`HLA-C.ligands` <- as.factor(dat$`HLA-C.ligands`)
+
+dat$`HLA-B.ligands` <- factor(dat$`HLA-B.ligands`,levels = c("Bw4Bw4","Bw6Bw6/Bw4Bw6"))
+dat$`HLA-C.ligands` <- factor(dat$`HLA-C.ligands`,levels = c("C2C2","C1C1/C1C2"))
+
+glm_toxicity_ligands_func <- function(var,data,interaction){
+  if(interaction==TRUE){
+    fla <- paste("Toxicity ~",paste(paste0("`",var,"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",var,"`"),"*Treatment_class",sep=""),sep = "+"))
+  
+  glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  } else {
+    glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(Toxicity~.,family = binomial(link=logit),data=.))
+  }
+  
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Toxicity),unname(data[[var]])))
+  rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+  
+  glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  
+  return(glm.result.total)
+}
+
+glm.ligands <- lapply(colnames(dat)[55:56],function(x) glm_toxicity_ligands_func(x, dat,FALSE))
+glm.ligands.int <- lapply(colnames(dat)[55:56],function(x) glm_toxicity_ligands_func(x, dat,TRUE))
+
+table.name <- c("HLA-B","HLA-C")
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands[[i]][[j]],caption = paste("Table4.1.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.int[[i]][[j]],caption = paste("Table4.1.",i+2,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+### 4.2  Association between toxicity level and HLA KIR ligands
+
+We are interested in the relationship between toxicity severity and HLA alleles. We take into consideration the severity of toxicity, which are 
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{No Toxicity}\\
+    1, & \text{Toxicity not severe}\\
+    2, & \text{Toxicity severe}
+  \end{cases}
+\end{aligned}
+$$
+And then applied proportional odds model adjusting for gender, age and treatment, where j represents toxicity severity levels
+
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.ligands+Gender+Age+Treatment+Treatment*HLA.ligands+\epsilon$$
+
+***Null Hypothesis***: HLA assigned by ligands is not associated with toxicity.
+
+***Results***: We still did not find any significant HLA ligands related to toxicity.
+
+```{r association4_prop, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+prop_toxicity_ligands_func <- function(var,data,interaction){
+  if(interaction==TRUE){
+    fla <- paste("Toxicity_level ~",paste(paste0("`",var,"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",var,"`"),"*Treatment_class",sep=""),sep = "+"))
+  
+  prop.result <- data %>%
+    dplyr::select(Toxicity_level,one_of(var),Gender,Age,Treatment_class) %>%
+    do(prop.result=polr(as.formula(fla),Hess = TRUE,data=.))
+  } else {
+    prop.result <- data %>%
+    dplyr::select(Toxicity_level,one_of(var),Gender,Age,Treatment_class) %>%
+    do(prop.result=polr(Toxicity_level~.,Hess = TRUE,data=.))
+  }
+  
+  
+  prop.result <- broom::tidy(prop.result[[1]][[1]])
+  
+  prop.result <- prop.result[,-5]
+  
+  prop.result$pvalue <- pnorm(abs(prop.result$statistic),lower.tail = FALSE)*2
+  
+  prop.result$odds.ratio <- exp(prop.result$estimate)
+  
+  prop.result[,2:6] <- sapply(prop.result[,2:6],function(x) round(x,2))
+  
+  colnames(prop.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  prop.result.n <- with(data,table(unname(data$Toxicity_level),unname(data[[var]])))
+ rownames(prop.result.n) <- c("toxicity:0","toxicity:1","toxicity:2")
+  
+  prop.result.total <- list("prop.result"=prop.result,"prop.result.n"=prop.result.n)
+  
+  return(prop.result.total)
+  
+}
+
+prop.ligands <- lapply(colnames(dat)[55:56],function(x) prop_toxicity_ligands_func(x, dat,FALSE))
+prop.ligands.int <- lapply(colnames(dat)[55:56],function(x) prop_toxicity_ligands_func(x, dat,TRUE))
+table.name <- c("HLA-B","HLA-C")
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.ligands[[i]][[j]],caption = paste("Table4.2.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.ligands[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.ligands.int[[i]][[j]],caption = paste("Table4.2.",i+2,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.ligands.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+### 4.3  Association between response and HLA KIR ligands
+```{r association4_glm_response, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+glm_response_ligands_func <- function(var,data,interaction){
+  if(interaction==TRUE){
+  fla <- paste("Responder ~",paste(paste0("`",var,"`"),"Gender","Age","Treatment_class",
+                                paste(paste0("`",var,"`"),"*Treatment_class",sep=""),sep = "+"))
+  
+  glm.result <- data %>%
+    dplyr::select(Responder,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  } else {
+    glm.result <- data %>%
+    dplyr::select(Responder,one_of(var),Gender,Age,Treatment_class) %>%
+    do(glm.result=glm(Responder~.,family = binomial(link=logit),data=.))
+  }
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Responder),unname(data[[var]])))
+  rownames(glm.result.n) <- c("response:0","response:1","response:NA")
+  
+  glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  
+  return(glm.result.total)
+}
+
+glm.ligands.response <- lapply(colnames(dat)[55:56],function(x) glm_response_ligands_func(x, dat,FALSE))
+glm.ligands.response.int <- lapply(colnames(dat)[55:56],function(x) glm_response_ligands_func(x, dat,TRUE))
+
+table.name <- c("HLA-B","HLA-C")
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.response[[i]][[j]],caption = paste("Table4.3.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.response[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+for(i in 1:2){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.response.int[[i]][[j]],caption = paste("Table4.3.",i+2,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.ligands.response.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+## 5. Association between toxicity and HLA-B dimorphism at position -21
+
+### 5.1  Association between toxicity and HLA-B dimorphism at position -21
+
+We are interested in the relationship between toxicity and HLA-B dimorphism at position -21. We firstly ignore the severity of toxicity and set up a logistic regression model adjusting gender, age and treatment. 
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.B.dimorphism21+Gender+Age+Treatment+Treatment*HLA.B.dimorphism21\epsilon$$
+
+***Null Hypothesis***: HLA-B dimorphism21 is not associated with toxicity.
+
+***Results***: If we include the interaction term, we did not find any significant result. But when 
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.B.dimorphism21+Gender+Age+Treatment+\epsilon$$
+We can see the existence of M for HLA-B.dimorphism shows the trend to siginificance of increasing the risk of toxicity compared to HLA-B.dimorphismTT.
+
+```{r association5_glm, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+dimorphism_dat <- read_excel("HLA_B_MT.xlsx")
+dimorphism_dat$`HLA Allele` <- str_remove(substr(dimorphism_dat$`HLA Allele`,1,5),":")
+dat$`HLA-B.dimorphism1` <- str_remove(substr(dat$`HLA-B Allele 1`,1,5),":")
+dat$`HLA-B.dimorphism2` <- str_remove(substr(dat$`HLA-B Allele 2`,1,5),":")
+
+dat$`HLA-B.dimorphism1`[which(dat$`HLA-B.dimorphism1` %in% dimorphism_dat$`HLA Allele`[which(dimorphism_dat$`B -21 MT`=="M")])] <- "M"
+dat$`HLA-B.dimorphism1`[which(dat$`HLA-B.dimorphism1` %in% dimorphism_dat$`HLA Allele`[which(dimorphism_dat$`B -21 MT`=="T")])] <- "T"
+dat$`HLA-B.dimorphism2`[which(dat$`HLA-B.dimorphism2` %in% dimorphism_dat$`HLA Allele`[which(dimorphism_dat$`B -21 MT`=="M")])] <- "M"
+dat$`HLA-B.dimorphism2`[which(dat$`HLA-B.dimorphism2` %in% dimorphism_dat$`HLA Allele`[which(dimorphism_dat$`B -21 MT`=="T")])] <- "T"
+
+dat$`HLA-B.dimorphism1`[which(!(dat$`HLA-B.dimorphism1` %in% c("M","T")))] <- NA
+dat$`HLA-B.dimorphism2`[which(!(dat$`HLA-B.dimorphism2` %in% c("M","T")))] <- NA
+
+
+dat$`HLA-B.dimorphism` <- with(dat,paste0(`HLA-B.dimorphism1`,`HLA-B.dimorphism2`))
+dat$`HLA-B.dimorphism`[which(str_detect(dat$`HLA-B.dimorphism`,"M"))] <- "MM/MT"
+dat$`HLA-B.dimorphism`[which(!str_detect(dat$`HLA-B.dimorphism`,"M"))] <- "TT"
+dat$`HLA-B.dimorphism` <- as.factor(dat$`HLA-B.dimorphism`)
+
+dat$`HLA-B.dimorphism` <- factor(dat$`HLA-B.dimorphism`,levels = c("TT","MM/MT"))
+
+
+
+glm.dimor <- lapply(colnames(dat)[59],function(x) glm_toxicity_ligands_func(x, dat,FALSE))
+glm.dimor.int <- lapply(colnames(dat)[59],function(x) glm_toxicity_ligands_func(x, dat,TRUE))
+
+table.name <- c("HLA-B")
+
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor[[i]][[j]],caption = paste("Table5.1.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.int[[i]][[j]],caption = paste("Table5.1.",i+1,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+```
+
+<br/>
+<br/>
+<br/>
+
+### 5.2 Association between toxicity level and HLA-B dimorphism at position -21
+
+We are interested in the relationship between toxicity severity and HLA-B dimorphism at position -21. We take into consideration the severity of toxicity, which are 
+$$
+\begin{aligned}
+  \begin{cases}
+    0, & \text{No Toxicity}\\
+    1, & \text{Toxicity not severe}\\
+    2, & \text{Toxicity severe}
+  \end{cases}
+\end{aligned}
+$$
+And then applied proportional odds model adjusting for gender, age and treatment, where j represents toxicity severity levels
+$$log(\frac{P(Toxicity<=j)}{P(Toxicity>j)})=HLA.B.dimorphism21+Gender+Age+Treatment+Treatment*HLA.B.dimorphism21+\epsilon$$
+
+***Null Hypothesis***: HLA-B dimorphism21 is not associated with toxicity.
+
+```{r association5_prop, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+prop.dimor <- lapply(colnames(dat)[59],function(x) prop_toxicity_ligands_func(x, dat,FALSE))
+prop.dimor.int <- lapply(colnames(dat)[59],function(x) prop_toxicity_ligands_func(x, dat,TRUE))
+table.name <- c("HLA-B")
+
+for(i in 1:1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.dimor[[i]][[j]],caption = paste("Table5.2.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.dimor[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+for(i in 1:1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(prop.dimor.int[[i]][[j]],caption = paste("Table5.2.",i+1,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(prop.dimor.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+### 5.3 Association between response and HLA-B dimorphism at position -21
+
+```{r association5_response, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+glm.dimor.response <- lapply(colnames(dat)[59],function(x) glm_response_ligands_func(x, dat,FALSE))
+glm.dimor.response.int <- lapply(colnames(dat)[59],function(x) glm_response_ligands_func(x, dat,TRUE))
+
+table.name <- c("HLA-B")
+
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.response[[i]][[j]],caption = paste("Table5.3.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.response[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.response.int[[i]][[j]],caption = paste("Table5.3.",i+1,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimor.response.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+### 5.4 Association between toxicity and HLA-B dimorphism at position -21 (add HLA-A imputed expression)
+
+$$log(\frac{P(Toxicity=Yes)}{P(Toxicity=No)})=HLA.B.dimorphism21+Gender+Age+Treatment+HLA.A.imputed.expression+\epsilon$$
+
+```{r association5_imputed, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+dat$`HLA-A.imputed1` <- substr(dat$`HLA-A Allele 1`,1,2)
+dat$`HLA-A.imputed2` <- substr(dat$`HLA-A Allele 2`,1,2)
+
+imputed_dat <- data.frame("HLA-A"=c("01","02","03","11","23","24","25","26","29","30","31","32","33","34","36","43","66","68","69","74","80"),
+                          "expression"=c(0.57,-0.20,-0.84,-0.00,0.25,0.89,-0.18,0.15,0.35,0.28,-0.74,-0.85,-0.90,0.34,0.21,-0.26,0.17,0.32,0.46,-1.09,-0.46))
+dat$`HLA-A.imputed1` <- imputed_dat$expression[match(dat$`HLA-A.imputed1`,imputed_dat$HLA.A)]
+dat$`HLA-A.imputed2` <- imputed_dat$expression[match(dat$`HLA-A.imputed2`,imputed_dat$HLA.A)]
+
+dat$`HLA-A.imputed` <- (dat$`HLA-A.imputed1` +dat$`HLA-A.imputed2`)/2
+
+glm_toxicity_dimorimpute_func <- function(var,data,interaction){
+  if(interaction==TRUE){
+    fla <- paste("Toxicity ~",paste(paste0("`",var,"`"),"Gender","Age","Treatment_class","`HLA-A.imputed`","`HLA-B.dimorphism`*`HLA-A.imputed`",paste(paste0("`",var,"`"),"*Treatment_class",sep=""),sep = "+"))
+  
+  glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class,`HLA-A.imputed`) %>%
+    do(glm.result=glm(as.formula(fla),family = binomial(link=logit),data=.))
+  } else {
+    glm.result <- data %>%
+    dplyr::select(Toxicity,one_of(var),Gender,Age,Treatment_class,`HLA-A.imputed`) %>%
+    do(glm.result=glm(Toxicity~Gender+Age+`HLA-B.dimorphism`+Treatment_class+`HLA-A.imputed`+`HLA-B.dimorphism`*`HLA-A.imputed`,family = binomial(link=logit),data=.))
+  }
+  
+  glm.result <- broom::tidy(glm.result[[1]][[1]])
+  
+  glm.result$odds.ratio <- exp(glm.result$estimate)
+  
+  glm.result[,2:6] <- sapply(glm.result[,2:6],function(x) round(x,2))
+  
+  colnames(glm.result) <- c("Variable","Estimate","Standard Error","Statistics","p-value","odds ratio")
+  
+  row.names(glm.result) <- NULL
+
+  glm.result.n <- with(data,table(unname(data$Toxicity),unname(data[[var]])))
+  rownames(glm.result.n) <- c("toxicity:0","toxicity:1")
+  
+  glm.result.total <- list("glm.result"=glm.result,"glm.result.n"=glm.result.n)
+  
+  return(glm.result.total)
+}
+
+glm.dimorimpute <- lapply(colnames(dat)[59],function(x) glm_toxicity_dimorimpute_func(x, dat,FALSE))
+glm.dimorimpute.int <- lapply(colnames(dat)[59],function(x) glm_toxicity_dimorimpute_func(x, dat,TRUE))
+
+table.name <- c("HLA-B")
+
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimorimpute[[i]][[j]],caption = paste("Table5.4.",i,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimorimpute[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+
+for(i in 1){
+  for(j in 1:2){
+    if(j==1){
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimorimpute.int[[i]][[j]],caption = paste("Table5.4.",i+1,table.name[i])))))
+    } else{
+      print(landscape(kable_styling(
+      knitr::kable(glm.dimorimpute.int[[i]][[j]],row.names = TRUE))))
+    }
+  }
+}
+```
+
+<br/>
+<br/>
+<br/>
+
+## 6. Haplotype
+
+### 6.1 All pairwise combinations
+
+```{r Haplotype, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+# dathap <- dat[,c(2,7,14:27)]
+# colnames(dathap)[3:16] <- c("A_1","A_2","B_1","B_2","C_1","C_2","DPB1_1","DPB1_2","DQA1_1","DQA1_2","DQB1_1","DQB1_2","DRB1_1","DRB1_2")
+# dathap[,3:16] <- sapply(dathap[,3:16],function(x) substring(x,1,5))
+# write.table(dathap,file="data.txt",col.names = TRUE,row.names = FALSE,sep = "\t",quote = FALSE)
+# 
+# library(BIGDAWG)
+# three_way <- list(c("A","B","C"),c("A","B","DPB1"),c("A","B","DQA1"),c("A","B","DQB1"),c("A","B","DRB1"),
+#                   c("A","C","DPB1"),c("A","C","DQA1"),c("A","C","DQB1"),c("A","C","DRB1"),
+#                   c("A","DPB1","DQA1"),c("A","DPB1","DQB1"),c("A","DPB1","DRB1"),
+#                   c("A","DQA1","DQB1"),c("A","DQA1","DRB1"),
+#                   c("A","DQB1","DRB1"),
+#                   c("B","C","DPB1"),c("B","C","DQA1"),c("B","C","DQB1"),c("B","C","DRB1"),
+#                   c("B","C","DQA1"),c("B","DPB1","DQB1"),c("B","DPB1","DRB1"),
+#                   c("B","DQA1","DQB1"),c("B","DQA1","DRB1"),
+#                   c("B","DQB1","DRB1"),
+#                   c("C","DPB1","DQA1"),c("C","DPB1","DQB1"),c("C","DPB1","DRB1"),
+#                   c("C","DQA1","DQB1"),c("C","DQA1","DRB1"),
+#                   c("C","DQB1","DRB1"),
+#                   c("DPB1","DQA1","DQB1"),c("DPB1","DQA1","DRB1"),
+#                   c("DPB1","DQB1","DRB1"),
+#                   c("DQA1","DQB1","DRB1")
+#                   )
+# hap.analysis <- BIGDAWG("data.txt",Run.Tests = "H",All.Pairwise = T)
+
+load("Analysis_2.RData")
+
+two_way_result <- data.frame()
+for(i in 1:21){
+  if(BD.out$H[[i]]$chisq[4]=="*"){
+    two_way_re <- data.frame(BD.out$H[[i]]$chisq)
+    rownames(two_way_re) <- colnames(BD.out$H[[i]]$freq)[1]
+    two_way_result <- rbind(two_way_result,two_way_re)
+  }
+}
+two_way_result <- add_column(two_way_result,HLA_group="B_DQB1",.before = "X.square")
+two_way_result <- two_way_result[,-5]
+colnames(two_way_result)[2] <- "Chi.square"
+
+two_way_detail <- data.frame(matrix(unlist(BD.out$H[[10]]$OR),nrow=15,byrow = FALSE))
+colnames(two_way_detail) <- c("Haplotype","OR","CI.L", "CI.U","p.value","sig")
+two_way_detail <- subset(two_way_detail,sig=="*")
+two_way_detail <- two_way_detail[,-6]
+two_way_detail$Haplotype <- str_replace_all(two_way_detail$Haplotype,"~","_")
+
+print(landscape(kable_styling(knitr::kable(two_way_result,row.names = FALSE,caption="Table6.1.1: All pairwise combinations"))))
+print(landscape(kable_styling(knitr::kable(two_way_detail,row.names = FALSE,caption="Table6.1.2: Detailed all pairwise combinations"))))
+```
+
+<br/>
+<br/>
+<br/>
+
+### 6.2 All pairwise combinations (three-way combinations)
+
+```{r Haplotype_3, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+load("Analysis.RData")
+
+three_way_result <- c()
+for(i in 1:35){
+  if(BD.out$H[[i]]$chisq[4]=="*"){
+    three_way_re <- data.frame(BD.out$H[[i]]$chisq)
+    rownames(three_way_re) <- colnames(BD.out$H[[i]]$freq)[1]
+    three_way_result <- rbind(three_way_result,three_way_re)
+  }
+}
+rownames(three_way_result) <- str_replace_all(rownames(three_way_result),"~","_")
+three_way_result <- add_column(three_way_result,HLA_group=rownames(three_way_result),.before = "X.square")
+three_way_result <- three_way_result[,-5]
+colnames(three_way_result)[2] <- "Chi.square"
+
+three_way_detail <- c()
+m=1
+for(i in c(21,22,23,28)){
+  three_way_detail_re <- data.frame(matrix(unlist(BD.out$H[[i]]$OR),nrow=length(BD.out$H[[i]]$OR)/6,byrow = FALSE))
+colnames(three_way_detail_re) <- c("Haplotype","OR","CI.L", "CI.U","p.value","sig")
+three_way_detail_re <- add_column(three_way_detail_re,HLA_group=rep(rownames(three_way_result)[m],nrow(three_way_detail_re)),.before = "Haplotype")
+
+three_way_detail_re <- subset(three_way_detail_re,sig=="*")
+m=m+1
+three_way_detail <- rbind(three_way_detail,three_way_detail_re)
+}
+three_way_detail <- three_way_detail[,-7]
+three_way_detail$Haplotype <- str_replace_all(three_way_detail$Haplotype,"~","_")
+
+print(landscape(kable_styling(knitr::kable(three_way_result,row.names = FALSE,caption="Table6.2.1: Three-way combinations"))))
+print(landscape(kable_styling(knitr::kable(three_way_detail,row.names = FALSE,caption="Table6.2.2: Detailed Three-way combinations"))))
+```
+
+
+<br/>
+<br/>
+<br/>
+
+
+## 8. GWAS analysis
+
+### 8.1 Toxicity
+
+![GWAS analsysis (Toxicity)](GWAS_toxicity.png)
+
+```{r GWAS_toxicity, echo=FALSE,warning=FALSE,message=FALSE}
+library(DT)
+gwas_toxicity <- read.table("GWAS_toxicity.csv",header = TRUE,sep = ",")
+gwas_toxicity <- gwas_toxicity[,c(-4)]
+DT::renderDataTable(gwas_toxicity,rownames=FALSE)
+```
+
+### 8.2 Response
+
+![GWAS analsysis (Response)](GWAS_response.png)
+
+```{r GWAS_response, echo=FALSE,warning=FALSE,message=FALSE}
+library(DT)
+gwas_response <- read.table("GWAS_response.csv",header = TRUE,sep = ",")
+gwas_response <- gwas_response[,c(-4)]
+DT::renderDataTable(gwas_response,rownames=FALSE)
+```
+
+<br/>
+<br/>
+<br/>
+
+### 8.3 CSMD1 gene
+
+
+![CSMD1 gene zoom in plot](CSMD1_zoomin.png)
+
+<br/>
+<br/>
+<br/>
+
+**Haplotype Analysis**
+
+SNPs in strong LD (R squared > 0.95): rs28418956,rs17395098,rs7828513
+
+**Toxicity ~ Responder + CSMD1 haplotype + Responder * CSMD1 haplotype**
+
+```{r CSMD1 haplotype,echo=FALSE,warning=FALSE,message=FALSE}
+#haplotype analysis 
+CSMD1_toxicity <- read.table("CSMD1_toxicity.txt",header = TRUE,sep = "\t")
+CSMD1_ld <- read.table("CSMD1_ld.ld",header = TRUE)
+colnames(CSMD1_ld)[6] <- "SNP" 
+CSMD1_toxicity <- CSMD1_toxicity %>%
+  left_join(.,CSMD1_ld[,c("SNP","R2")],by="SNP") %>%
+  dplyr::select(SNP,BP,P,R2) %>%
+  #mutate(PVAL=log10(P)) %>%
+  dplyr::rename(POS=BP,RSQR=R2,PVAL=P)
+rownames(CSMD1_toxicity) <- CSMD1_toxicity$SNP
+markers.in.strong.ld <- subset(CSMD1_toxicity, (row.names(CSMD1_toxicity) != "rs28418956:3431780:T:C" & CSMD1_toxicity$RSQR >= 0.95))
+gwas_toxicity <- read.table("GWAS_toxicity.csv",header = TRUE,sep=",")
+snp.list <- read.table("cleantotaldata_extractqc.chr8.phased.chunk1.impute2_info",header = TRUE,sep = " ")
+snp.list <- snp.list[,-1]
+sample.list <- read.table("cleantotaldata_extractqc.chr8.phased.sample",header = TRUE,sep = " ")
+sample.list <- sample.list[-1,]
+#extract 46/1 haplotype rows from .impute2 files, the same format as .haps files in shapeit
+#which.row <- which(snp.list$rs_id %in% c("rs28418956:3431780:T:C","rs17395098:3431730:A:G","rs7828513:3432054:C:T","JHU_8.3417556"))
+which.row <- which(snp.list$rs_id %in% c("rs28418956:3431780:T:C","rs17395098:3431730:A:G","rs7828513:3432054:C:T"))
+#which.row
+#tabulate it to individual level phased haplotypes
+impute_hap <- read.table("CSMD1_haplotype",header = FALSE,sep = " ")
+impute_hap <- data.frame(t(impute_hap)[-c(1:5),])
+colnames(impute_hap) <- c("snp1","snp2","snp3")
+impute_hap$snp1 <- ifelse(impute_hap$snp1==1,"G","A")
+impute_hap$snp2 <- ifelse(impute_hap$snp2==1,"C","T")
+impute_hap$snp3 <- ifelse(impute_hap$snp3==1,"T","C")
+#impute_hap$snp4 <- ifelse(impute_hap$snp4==1,"T","C")
+impute_hap$haplotype <- paste(impute_hap$snp1,impute_hap$snp2,impute_hap$snp3,impute_hap$snp4,sep = "")
+
+odd <- seq(1,nrow(sample.list)*2,2)
+even <- seq(2,nrow(sample.list)*2,2)
+
+hap_dat <- data.frame("Subject_ID"=sample.list$ID_2,"hap1"=impute_hap[odd,"haplotype"],"hap2"=impute_hap[even,"haplotype"])
+hap_dat$CSMD1 <- paste(hap_dat$hap1,hap_dat$hap2,sep = "/")
+hap_dat$CSMD1=as.character(hap_dat$CSMD1)
+hap_dat$CSMD1[which(!(hap_dat$CSMD1 %in%
+                           c("GCT/GCT","ATC/GCT","GCT/ATC")) & !(is.na(hap_dat$CSMD1)))]="Other"
+hap_dat$CSMD1[which(hap_dat$CSMD1=="ATC/GCT")]="GCT/ATC"
+#table(hap_dat$CSMD1)
+hap_dat$CSMD1=factor(hap_dat$CSMD1,levels = c("Other","GCT/ATC","GCT/GCT"))
+hap_dat$homo <- ifelse(hap_dat$CSMD1=="GCT/GCT",2,1)
+#write.table(hap_dat,file = paste(path,"individual_haplotype.csv",sep = ""),col.names = TRUE,row.names = FALSE,sep = ",")
+orig_dat <- read.table("dat.txt",header = TRUE,sep = "\t",
+                       stringsAsFactors = FALSE)
+orig_dat <- orig_dat %>%
+  dplyr::group_by(Subject_ID) %>% 
+  dplyr::filter(row_number(Subject_ID) == 1)
+hap_dat <- hap_dat %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder",
+                          "Dermatologic","GI","Liver","Muscle","Neuro","Thyroid","Joint","Pneumonitis")],
+            by="Subject_ID") %>%
+  dplyr::mutate(homo=as.factor(homo))
+
+hap_glm <- glm(Toxicity ~ Responder + homo + Responder * homo,data = hap_dat,family = binomial(link = "logit"))
+hap_sum <- data.frame(summary(hap_glm)$coefficients)
+hap_sum$odds_ratio <- exp(hap_sum$Estimate)
+hap_sum[,c(1:3,5)] <- sapply(hap_sum[,c(1:3,5)],function(y) round(y,2))
+hap_sum[,4] <- formatC(hap_sum[,4], format = "e", digits = 2)
+colnames(hap_sum) <- c("beta","se","z","p-value","odds ratio")
+rownames(hap_sum)[3:4] <- c("CSMD1 haplotype","Responder:CSMD1 haplotype") 
+knitr::kable(hap_sum)%>%
+  kable_styling() 
+```
+
+<br/>
+<br/>
+<br/>
+
+**Top 4 siginificant SNPs in GWAS**
+
+rs28418956,rs17395098,rs7828513,JHU_8.3417556
+
+**Toxicity ~ Responder + CSMD1 snp + Responder * CSMD1 snp**
+
+Additive model:
+
+```{r additive,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+orig_dat <- read.table("dat.txt",header = TRUE,sep = "\t",
+                       stringsAsFactors = FALSE)
+orig_dat <- orig_dat %>%
+  group_by(Subject_ID) %>% 
+  filter(row_number(Subject_ID) == 1)
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder))
+#recessive
+additive <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Toxicity~Responder+",as.symbol(colnames(snps_CSMD1)[x]),"+Responder*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(additive[[1]])%>%
+  kable_styling()
+knitr::kable(additive[[2]])%>%
+  kable_styling()
+knitr::kable(additive[[3]])%>%
+  kable_styling()
+knitr::kable(additive[[4]])%>%
+  kable_styling()
+```
+
+<br/>
+<br/>
+<br/>
+
+Recessive Model:
+
+```{r recessive,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder)) %>%
+  mutate(JHU_8.3417556_T=ifelse(JHU_8.3417556_T==2,1,0),
+         rs17395098.3431730.A.G_G=ifelse(rs17395098.3431730.A.G_G==2,1,0),
+         rs28418956.3431780.T.C_C=ifelse(rs28418956.3431780.T.C_C==2,1,0),
+         rs7828513.3432054.C.T_T=ifelse(rs7828513.3432054.C.T_T==2,1,0))
+#dominant
+recessive <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Toxicity~Responder+",as.symbol(colnames(snps_CSMD1)[x]),"+Responder*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(recessive[[1]])%>%
+  kable_styling()
+knitr::kable(recessive[[2]])%>%
+  kable_styling()
+knitr::kable(recessive[[3]])%>%
+  kable_styling()
+knitr::kable(recessive[[4]])%>%
+  kable_styling()
+```
+
+
+<br/>
+<br/>
+<br/>
+
+Dominant Model:
+
+```{r dominant,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder)) %>%
+  mutate(JHU_8.3417556_T=ifelse(JHU_8.3417556_T==0,0,1),
+         rs17395098.3431730.A.G_G=ifelse(rs17395098.3431730.A.G_G==0,0,1),
+         rs28418956.3431780.T.C_C=ifelse(rs28418956.3431780.T.C_C==0,0,1),
+         rs7828513.3432054.C.T_T=ifelse(rs7828513.3432054.C.T_T==0,0,1))
+#dominant
+dominant <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Toxicity~Responder+",as.symbol(colnames(snps_CSMD1)[x]),"+Responder*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(dominant[[1]])%>%
+  kable_styling()
+knitr::kable(dominant[[2]])%>%
+  kable_styling()
+knitr::kable(dominant[[3]])%>%
+  kable_styling()
+knitr::kable(dominant[[4]])%>%
+  kable_styling()
+```
+
+<br/>
+<br/>
+<br/>
+
+**Responder ~ Toxicity + CSMD1 snp + Toxicity * CSMD1 snp**
+
+Additive model:
+
+```{r additive_response,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder))
+#additive
+additive_response <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Responder~Toxicity+",as.symbol(colnames(snps_CSMD1)[x]),"+Toxicity*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(additive_response[[1]])%>%
+  kable_styling()
+knitr::kable(additive_response[[2]])%>%
+  kable_styling()
+knitr::kable(additive_response[[3]])%>%
+  kable_styling()
+knitr::kable(additive_response[[4]])%>%
+  kable_styling()
+```
+
+<br/>
+<br/>
+<br/>
+
+Recessive Model:
+
+```{r recessive_response,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder)) %>%
+  mutate(JHU_8.3417556_T=ifelse(JHU_8.3417556_T==2,1,0),
+         rs17395098.3431730.A.G_G=ifelse(rs17395098.3431730.A.G_G==2,1,0),
+         rs28418956.3431780.T.C_C=ifelse(rs28418956.3431780.T.C_C==2,1,0),
+         rs7828513.3432054.C.T_T=ifelse(rs7828513.3432054.C.T_T==2,1,0))
+#dominant
+recessive_response <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Responder~Toxicity+",as.symbol(colnames(snps_CSMD1)[x]),"+Toxicity*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(recessive_response[[1]])%>%
+  kable_styling()
+knitr::kable(recessive_response[[2]])%>%
+  kable_styling()
+knitr::kable(recessive_response[[3]])%>%
+  kable_styling()
+knitr::kable(recessive_response[[4]])%>%
+  kable_styling()
+```
+
+
+<br/>
+<br/>
+<br/>
+
+Dominant Model:
+
+```{r dominant_response,echo=FALSE,warning=FALSE,message=FALSE}
+snps_CSMD1 <- read.table("snps_CSMD1.raw",header = TRUE,sep = " ")
+snps_CSMD1 <- snps_CSMD1 %>%
+  dplyr::rename(Subject_ID=IID) %>%
+  left_join(.,orig_dat[,c("Subject_ID","Toxicity","Responder")],by="Subject_ID") %>%
+  mutate(Toxicity=as.factor(Toxicity),Responder=as.factor(Responder)) %>%
+  mutate(JHU_8.3417556_T=ifelse(JHU_8.3417556_T==0,0,1),
+         rs17395098.3431730.A.G_G=ifelse(rs17395098.3431730.A.G_G==0,0,1),
+         rs28418956.3431780.T.C_C=ifelse(rs28418956.3431780.T.C_C==0,0,1),
+         rs7828513.3432054.C.T_T=ifelse(rs7828513.3432054.C.T_T==0,0,1))
+#dominant
+dominant_response <- purrr::map(lapply(7:10, function(x) x),function(x){
+  form <- as.formula(paste0("Responder~Toxicity+",as.symbol(colnames(snps_CSMD1)[x]),"+Toxicity*",as.symbol(colnames(snps_CSMD1)[x])))
+  sum <- summary(glm(form,data = snps_CSMD1,
+      family = binomial(link = "logit")))
+  sum.coef <- data.frame(sum$coefficients)
+  sum.coef$odds_ratio <- exp(sum.coef$Estimate)
+  sum.coef[,c(1:3,5)] <- sapply(sum.coef[,c(1:3,5)],function(y) round(y,2))
+  sum.coef[,4] <- formatC(sum.coef[,4], format = "e", digits = 2)
+  colnames(sum.coef) <- c("beta","se","z","p-value","odds ratio")
+  sum.coef
+})
+
+knitr::kable(dominant_response[[1]])%>%
+  kable_styling()
+knitr::kable(dominant_response[[2]])%>%
+  kable_styling()
+knitr::kable(dominant_response[[3]])%>%
+  kable_styling()
+knitr::kable(dominant_response[[4]])%>%
+  kable_styling()
+```
+
+<br/>
+<br/>
+<br/>
+
+
+## 8.update GWAS analysis
+
+### 8.1.update Toxicity
+
+![GWAS analsysis (Toxicity) update](GWAS_toxicity_update.png)
+
+```{r GWAS_toxicity.update, echo=FALSE,warning=FALSE,message=FALSE}
+library(DT)
+gwas_toxicity_2 <- read.table("GWAS_toxicity_update.csv",header = TRUE,sep = ",")
+gwas_toxicity_2 <- gwas_toxicity_2[,c(-4)]
+DT::renderDataTable(gwas_toxicity_2,rownames=FALSE)
+```
+
+### 8.2.update Response
+
+![GWAS analsysis (Response) update](GWAS_response_update.png)
+
+```{r GWAS_response.update, echo=FALSE,warning=FALSE,message=FALSE}
+library(DT)
+gwas_response_2 <- read.table("GWAS_response_update.csv",header = TRUE,sep = ",")
+gwas_response_2 <- gwas_response_2[,c(-4)]
+DT::renderDataTable(gwas_response_2,rownames=FALSE)
+```
+
+<br/>
+<br/>
+<br/>
+
+## 9. Association with specific toxicity types
+
+Download complete result for each toxicity type here:
+
+```{r downloadDermatologic, echo=FALSE,warning=FALSE,message=FALSE}
+library(xfun)
+xfun::embed_files(c("Dermatologic_type.csv","GI_type.csv",
+                    "Liver_type.csv","Muscle_type.csv",
+                    "Neuro_type.csv","Thyroid_type.csv",
+                    "Joint_type.csv"),text = "Download Result")
+```
+
+<br/>
+<br/>
+<br/>
+
+Dermatologic~HLA-DRB1
+
+```{r assoc_HLA_DRB1,echo=FALSE,warning=FALSE,message=FALSE}
+dat_tox <- dat %>%
+  filter(Toxicity=="1") %>%
+  dplyr::select(Subject_ID,Toxicity,Responder,Dermatologic,GI,Joint,Liver,Pneumonitis,Thyroid,HLA_B.alleles,HLA_C.alleles,HLA_DRB1.alleles,HLA_DQB1.alleles)
+
+assoc1 <- dat_tox %>%
+  dplyr::mutate(
+    HLA_DRB1_01_01 = as.factor(ifelse(grepl("01:01",HLA_DRB1.alleles,fixed=TRUE),1,0)),
+    HLA_DRB1_03_01 = as.factor(ifelse(grepl("03:01",HLA_DRB1.alleles,fixed=TRUE),1,0)),
+    HLA_DRB1_11_01 = as.factor(ifelse(grepl("11:01",HLA_DRB1.alleles,fixed=TRUE),1,0)),
+    HLA_DRB1_15_01 = as.factor(ifelse(grepl("15:01",HLA_DRB1.alleles,fixed=TRUE),1,0)),
+    toxicity = as.factor(ifelse(Dermatologic==1,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,HLA_DRB1_01_01,HLA_DRB1_03_01,HLA_DRB1_11_01,HLA_DRB1_15_01) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+
+assoc1.gl <- glm(toxicity ~ HLA_DRB1_01_01 + HLA_DRB1_03_01+HLA_DRB1_11_01+HLA_DRB1_15_01+Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc1)
+assoc1.gl <- summary(assoc1.gl)
+assoc1.gl <- data.frame(assoc1.gl$coefficients)
+assoc1.gl$odds_ratio <- exp(assoc1.gl$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+assoc1.gl[,1:5] <- sapply(assoc1.gl[,1:5],function(x) round(x,2))
+colnames(assoc1.gl) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+rownames(assoc1.gl)[2:5] <- c("HLA-DRB1 01:01","HLA-DRB1 03:01","HLA-DRB1 11:01","HLA-DRB1 15:01")
+knitr::kable(assoc1.gl,row.names = TRUE,caption = "Logistic Regression result") %>%
+  kable_styling()
+```
+
+Dermatologic~HLA-DQB1
+
+```{r assoc_HLA_DQB1,echo=FALSE,warning=FALSE,message=FALSE}
+assoc2 <- dat_tox %>%
+  dplyr::mutate(
+    HLA_DQB1_02_01 = as.numeric(ifelse(grepl("02:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_03_01 = as.numeric(ifelse(grepl("03:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_05_01 = as.numeric(ifelse(grepl("05:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_06_02 = as.numeric(ifelse(grepl("06:02",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    toxicity = as.factor(ifelse(Dermatologic==1,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,HLA_DQB1_02_01,HLA_DQB1_03_01,HLA_DQB1_05_01,HLA_DQB1_06_02) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+
+assoc2.gl <- glm(toxicity ~ HLA_DQB1_02_01 + HLA_DQB1_03_01+HLA_DQB1_05_01+HLA_DQB1_06_02+Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc2)
+assoc2.gl <- summary(assoc2.gl)
+assoc2.gl <- data.frame(assoc2.gl$coefficients)
+assoc2.gl$odds_ratio <- exp(assoc2.gl$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+assoc2.gl[,1:5] <- sapply(assoc2.gl[,1:5],function(x) round(x,2))
+colnames(assoc2.gl) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+rownames(assoc2.gl)[2:5] <- c("HLA-DQB1 02:01","HLA-DQB1 03:01","HLA-DQB1 05:01","HLA-DQB1 06:02")
+knitr::kable(assoc2.gl,row.names = TRUE,caption = "Logistic Regression result") %>%
+  kable_styling()
+```
+
+GI ~ HLA-DQB1
+
+```{r assoc_HLA_DQB1_GI,echo=FALSE,warning=FALSE,message=FALSE}
+assoc3 <- dat_tox %>%
+  dplyr::mutate(
+    HLA_DQB1_02_01 = as.factor(ifelse(grepl("02:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_03_01 = as.factor(ifelse(grepl("03:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_05_01 = as.factor(ifelse(grepl("05:01",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    HLA_DQB1_06_02 = as.factor(ifelse(grepl("06:02",HLA_DQB1.alleles,fixed=TRUE),1,0)),
+    toxicity = as.factor(ifelse(GI==1,1,0))) %>%
+  dplyr::select(Subject_ID,toxicity,HLA_DQB1_02_01,HLA_DQB1_03_01,HLA_DQB1_05_01,HLA_DQB1_06_02) %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender")],by="Subject_ID") %>%
+  filter(!duplicated(Subject_ID))
+
+assoc3.gl <- glm(toxicity ~ HLA_DQB1_02_01 + HLA_DQB1_03_01+HLA_DQB1_05_01+HLA_DQB1_06_02+Treatment_class+Age+Gender,family = binomial(link=logit),data = assoc3)
+assoc3.gl <- summary(assoc3.gl)
+assoc3.gl <- data.frame(assoc3.gl$coefficients)
+assoc3.gl$odds_ratio <- exp(assoc3.gl$Estimate)
+#g$Variable <- rownames(g)
+#g <- g[,c(5,1:4)]
+assoc3.gl[,1:5] <- sapply(assoc3.gl[,1:5],function(x) round(x,2))
+colnames(assoc3.gl) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+rownames(assoc3.gl)[2:5] <- c("HLA-DQB1 02:01","HLA-DQB1 03:01","HLA-DQB1 05:01","HLA-DQB1 06:02")
+knitr::kable(assoc3.gl,row.names = TRUE,caption = "Logistic Regression result") %>%
+  kable_styling()
+
+
+#all results
+
+#Dermatologic
+dat_alleles_present = dat_alleles
+for(i in 10:217){
+  dat_alleles_present[,i] <- ifelse(dat_alleles_present[,i]==0,0,1)
+}
+dat_alleles_present = dat_alleles_present[,colSums(dat_alleles_present[,-c(1:9,218)]) >= 10]
+
+HLA_A <- colnames(dat_alleles_present)[grepl("HLA-A",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_B <- colnames(dat_alleles_present)[grepl("HLA-B",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_C <- colnames(dat_alleles_present)[grepl("HLA-C",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_DPB1 <- colnames(dat_alleles_present)[grepl("HLA-DPB1",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_DQA1 <- colnames(dat_alleles_present)[grepl("HLA-DQA1",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_DQB1 <- colnames(dat_alleles_present)[grepl("HLA-DQB1",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_DRB1 <- colnames(dat_alleles_present)[grepl("HLA-DRB1",colnames(dat_alleles_present),fixed=TRUE)]
+HLA_names <- list(HLA_A,HLA_B,HLA_C,HLA_DPB1,HLA_DQA1,HLA_DQB1,HLA_DRB1)
+
+assoc_all.result <- c()
+for(i in 1:7){
+  assoc.dat <- dat_alleles_present[,c("Subject_ID","Toxicity",HLA_names[[i]])]
+  assoc.dat <- assoc.dat %>%
+  dplyr::filter(Toxicity=="1") %>%
+  dplyr::left_join(dat[,c("Subject_ID","Treatment_class","Age","Gender","Pneumonitis")],by="Subject_ID") %>%
+  dplyr::mutate(Toxicity = as.factor(ifelse(Pneumonitis==1,1,0))) %>%
+  filter(!duplicated(Subject_ID)) %>%
+  dplyr::select(-Subject_ID,-Pneumonitis)
+  
+  assoc_all.gl <- glm(Toxicity ~ .,family = binomial(link=logit),data = assoc.dat)
+assoc_all.gl <- summary(assoc_all.gl)
+assoc_all.gl <- data.frame(assoc_all.gl$coefficients)
+assoc_all.gl$odds_ratio <- exp(assoc_all.gl$Estimate)
+assoc_all.gl[,1:5] <- sapply(assoc_all.gl[,1:5],function(x) round(x,2))
+colnames(assoc_all.gl) <- c("Beta","Standard Error","Statistics","p-value","odds ratio")
+assoc_all.gl$Variable <- rownames(assoc_all.gl)
+assoc_all.gl <- assoc_all.gl[,c(6,1:5)]
+rownames(assoc_all.gl) <- NULL
+assoc_all.result <- rbind(assoc_all.result,c(rep("",5)),assoc_all.gl)
+}
+write.table(assoc_all.result,file = "Pneumonitis_type.csv",row.names = FALSE,col.names = TRUE,sep = ",",quote = FALSE)
+
+```
+
+<br/>
+<br/>
+<br/>
+
+
+## 10. Gene Based Association Test (PrediXcan summary)
+
+Toxicity
+
+![Gene Based Association Test](ICI_toxicity_plot.png)
+
+```{r PrediXcan,echo=FALSE,results="asis"}
+gene_assoc <- read.table("ICI_result_toxicity.csv",header = TRUE,sep = ",")
+gene_assoc <- gene_assoc[1:10,]
+knitr::kable(gene_assoc) %>%
+   kable_styling()
+#write.table(gene_assoc,file = "ICI_gene_result.csv",col.names = TRUE,row.names = FALSE,sep = ",",quote = FALSE)
+```
+
+<br/>
+<br/>
+<br/>
+
+
+Response
+
+![Gene Based Association Test](ICI_response_plot.png)
+
+```{r PrediXcan_response,echo=FALSE,results="asis"}
+gene_assoc_response <- read.table("ICI_result_response.csv",header = TRUE,sep = ",")
+gene_assoc_response <- gene_assoc_response[1:10,]
+knitr::kable(gene_assoc_response) %>%
+   kable_styling()
+#write.table(gene_assoc,file = "ICI_gene_result.csv",col.names = TRUE,row.names = FALSE,sep = ",",quote = FALSE)
+```
+
+
+
+
+
+
+
+
+
